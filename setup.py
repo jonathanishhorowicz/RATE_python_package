@@ -10,7 +10,7 @@ setuptools.setup(
 	author_email="jonathan.ish-horowicz17@imperial.ac.uk",
 	long_description=long_description,
 	long_description_content_type="text/markdown",
-	url="git@github.com:jonathanishhorowicz/RATE_python_package.git",
+	url="https://github.com/lorinanthony/RATE",
 	packages=setuptools.find_packages(),
 	classifiers=[
 		"Programming Language :: Python :: 3",

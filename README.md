@@ -1,8 +1,15 @@
-# RATE Python development repo
+# RATE
 
-Development code. Released version is [here](https://github.com/lorinanthony/RATE/tree/master/Software/rate-bnn)
+A Python package containing code used to train Bayesian neural networks and compute their variable importance using RATE.
 
 # Installation
 
-Install using `pip install git+ssh://git@github.com/jonathanishhorowicz/RATE_python_package.git`, if you have access to this repo.
+In this directory, use the command `python setup.py install`.
 
+# Uninstalltion
+
+Use `pip uninstall rate`.
+
+# Requirements
+
+See the [requirements](requirements.txt). 

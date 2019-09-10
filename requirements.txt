@@ -10,4 +10,4 @@ seaborn
 joblib
 multiprocessing
 time
-warnings
+logging
