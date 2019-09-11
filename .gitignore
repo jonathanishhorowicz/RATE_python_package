@@ -1,1 +1,4 @@
-rate/__pycache__/
+rate/__pycache__/*
+dist/*
+rate.egg-info/*
+build/*
