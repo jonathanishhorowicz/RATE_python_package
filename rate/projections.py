@@ -51,7 +51,9 @@ class CovarianceProjection(ProjectionBase):
 			self._X_c = X - X.mean(axis=0)[np.newaxis,:]
 
 		n = self._X.shape[0]
+		logger.debug("n = {}".format(n))
 		M_F_c = M_F - M_F.mean(axis=1)
+		logger.debug("M_F_c has shape {}, self._X has shape {}, self._X_c has shape {}".format(M_F_c.shape, self._X.shape, self._X_c.shape))
 		M_B = 1.0/(n-1.0) * np.matmul(self._X_c.T, M_F_c[:,:,np.newaxis])[:,:,0]
 		# M_B = 1.0/(n-1.0) * np.einsum('ij,kj -> ik', M_F_c) check if these two lines are equivalent
 		V_B = 1.0/(n-1.0)**2.0 * np.matmul(np.matmul(self._X_c.T, V_F), self._X_c)
@@ -92,6 +94,8 @@ class PseudoinverseProjection(ProjectionBase):
 			logger.debug("Does not match cached X: calculating new pinv(X) and storing it")
 			self._X = X
 			self._X_dagger = np.linalg.pinv(self._X)
+
+		logger.debug("_X has shape {}, _X_dagger has shape {}".format(self._X.shape, self._X_dagger.shape))
 
 		# Calculate effect size analogue posterior mean and variance
 		M_B = np.matmul(self._X_dagger, M_F[:,:,np.newaxis])[:,:,0]

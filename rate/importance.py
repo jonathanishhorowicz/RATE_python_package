@@ -13,19 +13,25 @@ from .projections import CovarianceProjection, PseudoinverseProjection
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-def RATE2(M_F, V_F, X, projection=CovarianceProjection(), nullify=None, method="KLD"):
+def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD"):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
+		X: array containing input data, shape (n_examples, n_variables)
 		M_F: array containing logit posterior mean, shape (n_classes, n_examples).
 		V_F: array containing logit posterior covariance, shape (n_classes, n_examples, n_examples).
-		X: array containing input data, shape (n_examples, n_variables)
 		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
 	"""
+
+	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
+		raise ValueError("Inconsistent number of examples across X and logit posterior")
+	if M_F.shape[0] != V_F.shape[0]:
+		raise ValueError("Inconsistent number of classes between logit posterior mean and covariance")
+
 	logger.info("Calculating RATE values for {} classes, {} examples and {} variables".format(M_F.shape[0], X.shape[0], X.shape[1]))
 	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
 	logger.debug("Using {} method".format(method))
