@@ -34,18 +34,23 @@ def default_layers(p, C):
 	layers.append(tfp.layers.DenseLocalReparameterization(C))
 	return layers
 
+TARGET_TYPES = {
+	'BnnBinaryClassifier' : 'binary',
+	'BnnScalarRegressor' : 'continuous'
+}
+
 class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	"""Bayesian neural network base class.
 	"""
 
 	@abstractmethod
-	def __init__(self, layers, optimiser_fn, n_mc_samples, 
-				 verbose, target_type):
+	def __init__(self, layers, optimiser_fn, metrics, n_mc_samples, verbose):
 		self.layers = layers
 		self.optimiser_fn = optimiser_fn
+		self.metrics = metrics
 		self.n_mc_samples = n_mc_samples
 		self.verbose = verbose
-		self.target_type = target_type
+		self.target_type = TARGET_TYPES[self.__class__.__name__]
 
 		logger.debug("Constructed instance of {} with {} layers".format(
 			self.__class__.__name__,
@@ -60,16 +65,29 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 			logging.debug("No layers defined - using default architecture")
 			self.layers = self._get_layers(X, y)
 		self._logit_model = tf.keras.Sequential()
-		for l in self.layers:
-			self._logit_model.add(l)
+		for l in self.layers[:-1]:
+			logger.debug("Adding layer {} to network".format(l))
+			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - diesn't work with DenseLocalReparameterization layer for some reason
+		logger.debug("Adding DenseLocalReparameterization layer with {} units".format(self.layers[-1].units))
+		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use M mean-field approximation
 		self.p = self._logit_model.layers[0].input_shape[1]
 		self.C = self._logit_model.layers[-1].units
 		logger.debug("Compiling logit model...")
-		self._logit_model.compile(loss=self._elbo(), optimizer=self.optimiser_fn())
+		self._logit_model.compile(loss=self._elbo(), optimizer=self.optimiser_fn(), metrics=self.metrics)
 		self._hmodel = tf.keras.Model(self._logit_model.input , self._logit_model.layers[-2].output)
+
+		self.metrics_names = self._logit_model.metrics_names # To make sklearn cross-validation work
 
 	def fit(self, X, y, **kwargs):
 		"""Train the model on examples X and labels y
+
+		Args:
+			X: array of examples with shape (n_examples, n_variables)
+			y: array of labels with shape (n_examples, 1)
+			**kwargs: passed to the Keras fit method
+
+		Returns:
+			The fitted model. Also stores the keras fit history as a class attribute.
 		"""
 		logger.debug("Fitting model with X shape {} and y shape {}".format(X.shape, y.shape))
 		if X.ndim == 1:
@@ -169,22 +187,37 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		pass
 
 	def _check_labels(self, y):
-		"""Check labels match model
+		"""Check that labels match model type
 		"""
 		if type_of_target(y) != self.target_type:
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
+
+	def evaluate(self, X, y, **kwargs):
+		return self._logit_model.evaluate(X, y, **kwargs)
+
+	# @property
+	# def metrics_names(self):
+	# 	return self._logit_model.metrics_names
+
+	# @property
+	# def layers(self):
+	# 	return self._logit_model.layers
+
+	# @layers.setter
+	# def layers(self, l):
+	# 	self.layers = layers
 
 class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""Bayesian neural network for binary classification
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, n_mc_samples=100, verbose=1):
+	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=1):
 		super().__init__(
 			layers=layers,
 			optimiser_fn=optimiser_fn,
+			metrics=metrics,
 			n_mc_samples=n_mc_samples,
-			verbose=verbose,
-			target_type="binary")
+			verbose=verbose)
 
 	def _nll(self, labels, logits):
 		"""Negative log likelihood - the reconstruction term in the ELBO
@@ -236,13 +269,13 @@ class BnnScalarRegressor(BnnBase, RegressorMixin):
 	"""Bayesian neural network for scalar regression
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, n_mc_samples=100, verbose=1):
+	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["mse"], n_mc_samples=100, verbose=1):
 		super().__init__(
 			layers=layers,
 			optimiser_fn=optimiser_fn,
+			metrics=metrics,
 			n_mc_samples=n_mc_samples,
-			verbose=verbose,
-			target_type="continuous")
+			verbose=verbose)
 
 	def _nll(self, labels, logits):
 		"""Negative log likelihood - the reconstruction term in the ELBO
