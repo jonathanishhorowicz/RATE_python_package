@@ -13,7 +13,7 @@ from .projections import CovarianceProjection, PseudoinverseProjection
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD"):
+def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
@@ -22,6 +22,8 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 		V_F: array containing logit posterior covariance, shape (n_classes, n_examples, n_examples).
 		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
+		method:
+		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
@@ -35,20 +37,21 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 	logger.info("Calculating RATE values for {} classes, {} examples and {} variables".format(M_F.shape[0], X.shape[0], X.shape[1]))
 	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
 	logger.debug("Using {} method".format(method))
+
 	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
 
 	C = M_F.shape[0]
 	J = np.arange(X.shape[1])
 	if nullify is not None:
-		J = np.delete(np.arange(Lambda.shape[0]), nullify, axis=0)
+		J = np.delete(J, nullify, axis=0)
 
 	KLDs = [np.zeros(J.shape[0]) for _ in range(C)]
 
 	for c in range(C):
 		logger.info("Calculating RATE values for class {} of {}".format(c, C))
-		Lambda = np.linalg.pinv(V_B[c])
 		for j in tqdm(J):
 			if method=="KLD":
+				Lambda = np.linalg.pinv(V_B[c] + jitter*np.eye(V_B.shape[1]))
 				if nullify is not None:
 					j = np.array(np.unique(np.concatenate(([j], nullify)), axis=0))
 				m = M_B[c,j]
@@ -90,6 +93,9 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 						Sigma_red,
 						rcond=None)[0])
 				KLDs[c][j] = -0.5 * np.log(1.0 - alpha/Sigma[j,j])
+
+	if (np.array(KLDs) < 0.0).any():
+		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
                                                  
 	out = [klds / np.sum(klds) for klds in KLDs]
 

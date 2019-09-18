@@ -192,20 +192,10 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		if type_of_target(y) != self.target_type:
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
 
-	def evaluate(self, X, y, **kwargs):
-		return self._logit_model.evaluate(X, y, **kwargs)
+	# def evaluate(self, X, y, **kwargs):
+	# 	return self._logit_model.evaluate(X, y, **kwargs)
+	# Maybe better not to use this method due to possible confusion between keras and sklearn APIs
 
-	# @property
-	# def metrics_names(self):
-	# 	return self._logit_model.metrics_names
-
-	# @property
-	# def layers(self):
-	# 	return self._logit_model.layers
-
-	# @layers.setter
-	# def layers(self, l):
-	# 	self.layers = layers
 
 class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""Bayesian neural network for binary classification
@@ -240,11 +230,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	def predict_proba(self, X, n_mc_samples=None, **kwargs):
 		"""Returns mean of predicted class probabilities over Monte Carlo samples
 		"""
-		check_is_fitted(self, "_logit_model")
-		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Predicting mean class probabilities with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)]))
-		proba_preds = 1.0/(1.0+np.exp(-logit_preds))
+		proba_preds = self.predict_proba_samples(X, n_mc_samples, **kwargs)
 		return proba_preds.mean(axis=0)
 
 	def _get_layers(self, X, y):
