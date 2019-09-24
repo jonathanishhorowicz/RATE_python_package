@@ -13,7 +13,7 @@ from .projections import CovarianceProjection, PseudoinverseProjection
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9):
+def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9, return_time=False):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
@@ -24,9 +24,11 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
 		method:
 		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness
+		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
+		If return_time=True then a 2-tuple containing rate_vals and the computation time is returned.
 	"""
 
 	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
@@ -47,6 +49,7 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 
 	KLDs = [np.zeros(J.shape[0]) for _ in range(C)]
 
+	start_time = time.time()
 	for c in range(C):
 		logger.info("Calculating RATE values for class {} of {}".format(c, C))
 		for j in tqdm(J):
@@ -98,86 +101,55 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
                                                  
 	out = [klds / np.sum(klds) for klds in KLDs]
+	rate_time = time.time() - start_time
+
+	logger.info("The RATE calculation took {} seconds".format(round(rate_time, 3)))
 
 	if C==1:
-		return out[0]
+		out = out[0]
+	
+	if return_time:
+		return out, rate_time
 	else:
 		return out
 
-# def get_esa_posterior(model, X, projection):
-# 	if isinstance(model, BnnBase):
-# 		C = model.C
-# 		M_W, V_W, b = model.var_params()
-# 		H = model.H(X)
-# 		return esa_posterior_bnn(X, H, M_W, V_W, b, C, projection)
-# 	elif isinstance(model, GP):
-# 		return esa_posterior_gp(model, X)
-# 	else:
-# 		raise ValueError("Model type {} is not supported".format(type(model)))
+def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
+	"""
+	Calculate permutation importances for a BNN or its mimic. Also returns the time taken
+    so result is a 2-tuple (array of importance values, time)
 
-# def esa_posterior_gp(gp, X, projection):
-# 	"""Regression/binary classification only
-# 	"""
-# 	M_F, V_F = gp.predict_f_full_cov(X)
-# 	if projection == "covariance":
-# 		M_F -= M_F.mean(axis=0)[np.newaxis,:] # Centering
-# 		X_c = X - X.mean(axis=0)[np.newaxis,:]
-# 		M_B = 1.0/(n-1.0) * np.matmul(X_C.T, M_F)
-# 		V_B = 1.0(n-1.0)**2.0 * np.matmul(np.matmul(X_c.T, V_F), X_c)
-# 	elif projection == "linear":
-# 		GenInv = np.linalg.pinv(X)
-# 		M_B = np.matmul(GenInv, M_F)
-# 		V_B = np.matmul(np.matmul(GenInv, V_F), GenInv.T)
+	Args:
+		model: a BNN_Classifier, RandomForestClassifier or GradientBoostingClassifier
+		X, y: examples and labels. The permutation importances are computed by shuffling columns
+			  of X and seeing how the prediction accuracy for y is affected
+		features: How many features to compute importances for. Default (None) is to compute
+				  for every feature. Otherwise use a list of integers
+		n_examples: How many examples to use in the computation. Default (None) uses all the
+					features. Otherwise choose a positive integer that is less than 
+					the number of rows of X/y.
+		n_mc_samples: number of MC samples (BNN only)
 
-# def esa_posterior_bnn(X, H, M_W, V_W, b, C, projection="covariance"):
-# 	"""
-# 	Compute the means and covariance of the effect size analogues B for a Bayesian neural network
-# 	described in (Ish-Horowicz et al., 2019)
+	Returns a 1D array of permutation importance values in the same order as the columns of X
+	"""
+	X_df, y_df = pd.DataFrame(X), pd.DataFrame(y)
+	X_df.columns = X_df.columns.map(str) # rfpimp doesn't like integer column names
 
-# 	Args:
-# 		X: array of inputs with shape (n_examples, n_input_dimensions)
-# 		H: array of penultimate network layer outputs with shape (n_examples, final_hidden_layer_size)
-# 		M_W: Array of final weight matrix means with shape (final_hidden_layer_size, n_classes)
-# 		V_W: Array of final weight matrix variances with shape (final_hidden_layer_size, final_hidden_layer_size, n_classes)
-# 		b: Final layer (deterministic) bias
-# 		C: number of classes
-# 		projection: Projection operator for computing effect size analogues. Either "linear" (pseudoinverse) or "covariance" (default).
+	if n_examples is None:
+		n_examples = -1
+	start_time = time.time()
+	if isinstance(model, BNN_Classifier):
+		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df,
+								metric=lambda model, X, y, sw: model.score(X, y, n_mc_samples, sample_weight=sw), n_samples=n_examples, sort=False).values)
+	elif isinstance(model, RandomForestClassifier) or isinstance(model, GradientBoostingClassifier):
+		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df, n_samples=n_examples, sort=False).values)
+	time_taken = time.time() - start_time
+	return imp_vals, time_taken
 
-# 	Returns:
-# 		M_B: an array of means of B, the multivariate effect size analgoues, with shape (n_classes, n_pixels)
-# 		V_B: an array of covariance of B, the multivariate effect size analgoues, with shape (n_classes, n_pixels, n_pixels)
-
-# 	"""
-# 	assert X.shape[0]==H.shape[0], "Number of examples (first dimension) of X and H must match"
-# 	assert b.shape[0]==C, "Number of bias units must match number of nodes in the logit layer"
-# 	assert M_W.shape[1]==C, "Second dimension of logit weight means must match number of classes"
-# 	assert V_W.shape[1]==C, "Second dimension of logit weight variances must match number of classes"
-# 	assert M_W.shape[0]==V_W.shape[0], "means and variances of logit weight matrix must have the same shape"
-# 	assert H.shape[1]==M_W.shape[0], "Second dimension of logit weight means must match H.shape[1], the penultimate layer size"
-
-# 	n = H.shape[0]
-
-# 	# Logits
-# 	M_F = np.matmul(H, M_W) + b[np.newaxis,:]
-# 	V_F = np.array([np.matmul(H*V_W[:,c], H.T) for c in range(C)])
-
-# 	# Effect size analogues
-# 	if projection == 'covariance':
-# 		# Centred logits
-# 		M_F_c = M_F - M_F.mean(axis=0)[np.newaxis,:]
-# 		V_F_c = V_F # NB ignoring the additional variance due to centering + 1.0/n**2.0 * V_F.mean(axis=0)
-# 		X_c = X - X.mean(axis=0)[np.newaxis,:]
-# 		M_B = 1.0/(n-1.0) * np.array([np.matmul(X_c.T, M_F_c[:,c]) for c in range(C)])
-# 		V_B = 1.0/(n-1.0)**2.0 * np.array([np.matmul(np.matmul(X_c.T, V_F_c[c,:,:]), X_c)for c in range(C)])
-# 	elif projection == 'linear': 
-# 		GenInv = np.linalg.pinv(X)
-# 		M_B_mat = np.matmul(GenInv, M_F)
-# 		M_B = np.array([M_B_mat[:, c] for c in range(C)]) # What does this line do?
-# 		V_B = np.array([np.matmul(np.matmul(GenInv, V_F[c, :, :]), GenInv.T) for c in range(C)])
-# 	else: 
-# 		raise ValueError("Unrecognised projection {}, please use `covariance` or `linear`".format(projection))
-	    
-# 	return M_B, V_B
+# ****************************************************************************************************
+# ****************************************************************************************************
+# ************************ DEPRECATED CODE BELOW THIS POINT - WILL BE REMOVED ************************
+# ****************************************************************************************************
+# ****************************************************************************************************
     
 def RATE_sequential(mu_c, Lambda_c, nullify=None):
     """
@@ -411,34 +383,3 @@ def RATE_BNN(bnn, X, groups=None, nullify=None, effect_size_analogue="covariance
 	else:
 		return out, rate_time
 
-def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
-	"""
-	Calculate permutation importances for a BNN or its mimic. Also returns the time taken
-    so result is a 2-tuple (array of importance values, time)
-
-	Args:
-		model: a BNN_Classifier, RandomForestClassifier or GradientBoostingClassifier
-		X, y: examples and labels. The permutation importances are computed by shuffling columns
-			  of X and seeing how the prediction accuracy for y is affected
-		features: How many features to compute importances for. Default (None) is to compute
-				  for every feature. Otherwise use a list of integers
-		n_examples: How many examples to use in the computation. Default (None) uses all the
-					features. Otherwise choose a positive integer that is less than 
-					the number of rows of X/y.
-		n_mc_samples: number of MC samples (BNN only)
-
-	Returns a 1D array of permutation importance values in the same order as the columns of X
-	"""
-	X_df, y_df = pd.DataFrame(X), pd.DataFrame(y)
-	X_df.columns = X_df.columns.map(str) # rfpimp doesn't like integer column names
-
-	if n_examples is None:
-		n_examples = -1
-	start_time = time.time()
-	if isinstance(model, BNN_Classifier):
-		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df,
-								metric=lambda model, X, y, sw: model.score(X, y, n_mc_samples, sample_weight=sw), n_samples=n_examples, sort=False).values)
-	elif isinstance(model, RandomForestClassifier) or isinstance(model, GradientBoostingClassifier):
-		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df, n_samples=n_examples, sort=False).values)
-	time_taken = time.time() - start_time
-	return imp_vals, time_taken

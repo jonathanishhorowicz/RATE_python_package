@@ -23,11 +23,13 @@ def mean_soft_prediction(bnn, X, n_mc_samples):
 		raise ValueError("BNN is neither regressor nor classifier!")
 
 
-def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_samples=100):
+def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_samples=100, return_time=False):
 	"""
 	Get the random forest trained to mimic the mean
 	predictions of a Bayesian neural network. The mimic model is a regression model trained
 	trained on the soft predictions (the logits) of the BNN.
+
+	TODO: better to pass prediction lambda function as argument rather than the bnn
 
 	Model selection is performed using random search cross-validation with 10 iterations and 5 folds - this can be quite
 	slow but shouldn't take more than 10 minutes when parallelised over all available
@@ -50,6 +52,7 @@ def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_sampl
 					to those of the BNN. The size of the second dimension must match the number of input dimensions expected by the BNN
 		n_mc_samples: the number of MC samples used when making BNN predictions.
 						Their mean is used as the labels for the random forest.
+		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 	"""
 	logger.debug("Fitting mimic model of type {} on inputs with shape {} and {} MC samples".format(type(mimic_model), x_train.shape, n_mc_samples))
 	logger.debug("Supplied arguments: y_train: {}, x_test: {}".format(y_train is None, x_test is None))
@@ -82,4 +85,7 @@ def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_sampl
 		mimic_test_r2 = fit_result.score(x_test, mean_soft_prediction(bnn, x_test, n_mc_samples))
 		logger.info("Mimic R^2 on x_test: {:.3f}".format(mimic_test_r2))
 
-	return mimic_model, fit_time
+	if return_time:
+		return mimic_model, fit_time
+	else:
+		return mimic_model
