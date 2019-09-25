@@ -2,12 +2,14 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from scipy.stats import rankdata
 import time
-import warnings
+import logging
+logger = logging.getLogger(__name__)
 
 def make_1d2d(arr):
 	assert arr.ndim == 1
@@ -25,6 +27,49 @@ def onehot_encode_labels(y):
 		array with shape (n_examples, n_classes)
 	"""
 	return OneHotEncoder(categories="auto", sparse=False).fit_transform(y.reshape(y.shape[0],1))
+
+def get_roc_curves(variable_importances):
+    """
+	Calculate ROC curves
+
+    # TODO: set row idx as variable
+    
+    Args:
+        variable_importances: A dataframe with the following columns:
+            - method
+            - n
+            - p
+            - repeat_idx
+            - variable
+    """
+    
+    roc_curve_df = pd.DataFrame()
+    base_fpr = np.linspace(0, 1, 101) # Interpolate tpr (y-axis) at these fpr (x-axis) values
+
+    for method in variable_importances["method"].unique():
+        for n in variable_importances["n"].unique():
+            for p in variable_importances["p"].unique():
+                for repeat_idx in range(np.amax(variable_importances["repeat_idx"].unique()+1)):
+                    df = variable_importances.loc[
+                        (variable_importances["method"]==method) &
+                        (variable_importances["repeat_idx"]==repeat_idx) &
+                        (variable_importances["n"]==n) &
+                        (variable_importances["p"]==p)
+                    ]
+                    if len(df)==0:
+                        continue
+                    preds, labels = df["value"].values, df["causal"].values.astype(float)
+                    fpr, tpr, _ = roc_curve(labels, np.abs(preds))
+                    interp_tpr = np.interp(base_fpr, fpr, tpr)
+                    auroc = auc(fpr, tpr)
+                    roc_curve_df = pd.concat([
+                        roc_curve_df,
+                        pd.DataFrame({
+                            "fpr" : base_fpr, "tpr" : interp_tpr, "auc" : auroc,
+                            "method" : method, "n" : n, "p" : p
+                            })
+                    ])
+    return roc_cur
 
 def load_mnist(onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 	"""
@@ -52,10 +97,10 @@ def load_mnist(onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 
 	if classes is None and not onehot_encode:
 		onehot_encode = True
-		warnings.warn("Multi-class classification requires one-hot encoded labels")
+		logger.warning("Multi-class classification requires one-hot encoded labels")
 	elif classes is not None and onehot_encode:
 		onehot_encode = False
-		warnings.warn("Binary classification doesn't use one-hot encoded labels")
+		logger.warning("Binary classification doesn't use one-hot encoded labels")
 
 	def crop(X, crop_size):
 		assert crop_x < X.shape[1]/2
