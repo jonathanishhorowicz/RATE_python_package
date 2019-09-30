@@ -55,7 +55,7 @@ def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_sampl
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 	"""
 	logger.debug("Fitting mimic model of type {} on inputs with shape {} and {} MC samples".format(type(mimic_model), x_train.shape, n_mc_samples))
-	logger.debug("Supplied arguments: y_train: {}, x_test: {}".format(y_train is None, x_test is None))
+	logger.debug("Supplied arguments: y_train: {}, x_test: {}".format(y_train is not None, x_test is not None))
 	if isinstance(mimic_model, BaseSearchCV):
 		if not is_regressor(mimic_model.estimator):
 			raise ValueError("Mimic model must be a regression model")

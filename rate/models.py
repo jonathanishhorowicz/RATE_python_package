@@ -9,8 +9,9 @@ from abc import ABCMeta, abstractmethod
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted
+from sklearn.metrics import accuracy_score, roc_auc_score
 
-from tensorflow.losses import mean_squared_error
+from tensorflow.compat.v1.losses import mean_squared_error
 from tensorflow.nn import sigmoid_cross_entropy_with_logits, softmax_cross_entropy_with_logits_v2
 from tensorflow.keras.optimizers import Adam
 
@@ -59,24 +60,25 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	def _build_model(self, X, y):
 		"""Compile the keras model for the logits
 		"""
-		logging.debug("Fitting model with X shape {} and y shape {}".format(X.shape, y.shape))
+		logging.debug("Fitting {} model with X shape {} and y shape {}".format(X.shape, y.shape, self.__class__.__name__))
 
 		if len(self.layers) == 0:
-			logging.debug("No layers defined - using default architecture")
+			logging.debug("No layers defined - using default architecture for {}".format(self.__class__.__name__))
 			self.layers = self._get_layers(X, y)
 		self._logit_model = tf.keras.Sequential()
 		for l in self.layers[:-1]:
-			logger.debug("Adding layer {} to network".format(l))
+			logger.debug("Adding layer {} to {}".format(l, self.__class__.__name__))
 			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - diesn't work with DenseLocalReparameterization layer for some reason
 		logger.debug("Adding DenseLocalReparameterization layer with {} units".format(self.layers[-1].units))
 		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use M mean-field approximation
 		self.p = self._logit_model.layers[0].input_shape[1]
 		self.C = self._logit_model.layers[-1].units
-		logger.debug("Compiling logit model...")
+		logger.debug("Compiling logit model for {}...".format(self.__class__.__name__))
 		self._logit_model.compile(loss=self._elbo(), optimizer=self.optimiser_fn(), metrics=self.metrics)
 		self._hmodel = tf.keras.Model(self._logit_model.input , self._logit_model.layers[-2].output)
 
 		self.metrics_names = self._logit_model.metrics_names # To make sklearn cross-validation work
+		logger.debug("{} logit model was compiled with the following metrics: {}".format(self.__class__.__name__, self.metrics_names))
 
 	def fit(self, X, y, **kwargs):
 		"""Train the model on examples X and labels y
@@ -193,7 +195,7 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
 
 	# def evaluate(self, X, y, **kwargs):
-	# 	return self._logit_model.evaluate(X, y, **kwargs)
+	# 	return self.score(X, y, **kwargs)
 	# Maybe better not to use this method due to possible confusion between keras and sklearn APIs
 
 
@@ -201,7 +203,7 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""Bayesian neural network for binary classification
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=1):
+	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=0):
 		super().__init__(
 			layers=layers,
 			optimiser_fn=optimiser_fn,
@@ -252,11 +254,25 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		proba_preds = 1.0/(1.0+np.exp(-logit_preds))
 		return (proba_preds > 0.5).astype(int)
 
+	def score(self, X, y, metric="accuracy", n_mc_samples=None, **kwargs):
+		"""Score the model on its predictions of labels y from examples X
+		"""
+		if type_of_target(y) != self.target_type:
+			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
+		if metric=="accuracy":
+			return accuracy_score(y, self.predict(X, n_mc_samples), **kwargs)
+		elif metric=="auc":
+			return roc_auc_score(y, self.predict_proba(X, n_mc_samples), **kwargs)
+		elif callable(metric):
+			return metric(y, self.predict_proba(X, n_mc_samples), **kwargs)
+		else:
+			raise ValueError("metric must be either 'accuracy', 'auc' or callable")
+
 class BnnScalarRegressor(BnnBase, RegressorMixin):
 	"""Bayesian neural network for scalar regression
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["mse"], n_mc_samples=100, verbose=1):
+	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["mse"], n_mc_samples=100, verbose=0):
 		super().__init__(
 			layers=layers,
 			optimiser_fn=optimiser_fn,

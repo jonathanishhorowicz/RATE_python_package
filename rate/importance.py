@@ -4,12 +4,13 @@ import time
 import rfpimp as rfp
 from tqdm import tqdm
 
+from .models import BnnBase
+from .projections import CovarianceProjection, PseudoinverseProjection
+from .logutils import TqdmLoggingHandler
+
 import logging
 logger = logging.getLogger(__name__)
-
-#from GPy.core import GP
-from .models import BnnBase
-from .projections import CovarianceProjection, PseudoinverseProjection	
+logger.addHandler(TqdmLoggingHandler())
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
@@ -51,7 +52,7 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 
 	start_time = time.time()
 	for c in range(C):
-		logger.info("Calculating RATE values for class {} of {}".format(c, C))
+		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
 		for j in tqdm(J):
 			if method=="KLD":
 				Lambda = np.linalg.pinv(V_B[c] + jitter*np.eye(V_B.shape[1]))
