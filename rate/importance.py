@@ -5,7 +5,7 @@ import rfpimp as rfp
 from tqdm import tqdm
 
 from .models import BnnBase
-from .projections import CovarianceProjection, PseudoinverseProjection
+from .projections import CovarianceProjection
 from .logutils import TqdmLoggingHandler
 
 import logging
@@ -14,22 +14,25 @@ logger.addHandler(TqdmLoggingHandler())
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9, return_time=False):
+def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9, return_time=False, return_KLDs=False):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
 		X: array containing input data, shape (n_examples, n_variables)
 		M_F: array containing logit posterior mean, shape (n_classes, n_examples).
 		V_F: array containing logit posterior covariance, shape (n_classes, n_examples, n_examples).
-		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase
+		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase. These are defined in projections.py
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
-		method:
-		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness
+		method: from when I was investigating the effect of the bug. Just use "KLD" (default), which is the correct RATE calculation
+		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness. The code will warn you if any of the resulting KLD values
+				are negative, in which case you should try a larger jitter. This is due to the covariance matrices of the logit posterior not being positive semi-definite.
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
+		return KLDs: whether to return the KLD values as well as the RATE values. For debugging. Default is False.
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
 		If return_time=True then a 2-tuple containing rate_vals and the computation time is returned.
+		If return_KLDs=True then the first item of the 2-tuple is itself a 2-tuple of (RATE_values, KLD_values)
 	"""
 
 	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
@@ -110,9 +113,10 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 		out = out[0]
 	
 	if return_time:
-		return out, rate_time
-	else:
-		return out
+		out = [out, rate_time]
+	if return_KLDs:
+		out = [out, KLDs]
+	return out
 
 def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
 	"""

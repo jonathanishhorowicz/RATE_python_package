@@ -69,7 +69,7 @@ def get_roc_curves(variable_importances):
                             "method" : method, "n" : n, "p" : p
                             })
                     ])
-    return roc_cur
+    return roc_curve_df
 
 def load_mnist(onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 	"""

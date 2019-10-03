@@ -11,7 +11,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 def cross_validate_bnn(layer_list, X, y, k,
-                       init_args={}, fit_args={}, score_args={}):
+                       init_args={}, fit_args={}, score_args={},
+                       n_jobs=None):
+    """Stratified K-fold cross-validation of the BNN models defined by the layers in `layer_list` on data X, y.
+    The type of model is inferred from y.
+
+    Args:
+        layer list: list of lists, where each list contains a layer specification for a BNN.
+        X: data matrix with shape (n_examples, n_variables)
+        y: labels. The type of model (regression or classification) will be inferred from y
+        k: integer specifying the number of folds to use in the cross-validation
+        init_args: kwargs passed to the BNN __init__ method
+        fit_args: kwargs passed to the fit method of the BNN
+        score_args: kwargs passed to the score method of the BNN
+        n_jobs: number of workers to parallise the fits over. Not currently implemented.
+    """
+
     if X.shape[0] != y.shape[0]:
         raise ValueError("X and y do not have the same number of observations")
         
@@ -24,7 +39,7 @@ def cross_validate_bnn(layer_list, X, y, k,
     else:
         raise ValueError("Unsupported target type {}".format(target_type))
         
-    val_acc_grid = np.zeros((len(layer_list), k))
+    val_score_grid = np.zeros((len(layer_list), k))
     
     for i, layers in enumerate(layer_list):
         logger.debug("Model #{} of {}".format(i, len(layer_list)))
@@ -35,20 +50,20 @@ def cross_validate_bnn(layer_list, X, y, k,
             
             bnn = bnn_init(layers=layers, **init_args)
             bnn.fit(X_train, y_train, **fit_args)
-            val_acc_grid[i,j] = bnn.score(X_val, y_val, **score_args)
+            val_score_grid[i,j] = bnn.score(X_val, y_val, **score_args)
     
     # Refit the best model on the whole dataset
-    best_model_idx = val_acc_grid.mean(axis=1).argmax()
+    best_model_idx = val_score_grid.mean(axis=1).argmax()
     logger.info("Model {} had the largest mean validation metric: {:.3f} pm {:.3f} (mean pm std over {} folds)".format(
 
         best_model_idx,
-        val_acc_grid.mean(axis=1)[best_model_idx],
-        val_acc_grid.std(axis=1)[best_model_idx],
+        val_score_grid.mean(axis=1)[best_model_idx],
+        val_score_grid.std(axis=1)[best_model_idx],
         k))
     bnn_best = bnn_init(layer_list[best_model_idx], **init_args)
     bnn_best.fit(X, y, **fit_args)
     
-    return bnn_best, val_acc_grid
+    return bnn_best, val_score_grid
 
 # def cross_validate_bnn_sklearn(
 #     X, y, param_grid,

@@ -29,7 +29,7 @@ def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_sampl
 	predictions of a Bayesian neural network. The mimic model is a regression model trained
 	trained on the soft predictions (the logits) of the BNN.
 
-	TODO: better to pass prediction lambda function as argument rather than the bnn
+	TODO: better to pass prediction lambda function as argument rather than the bnn itself
 
 	Model selection is performed using random search cross-validation with 10 iterations and 5 folds - this can be quite
 	slow but shouldn't take more than 10 minutes when parallelised over all available
@@ -45,7 +45,7 @@ def train_mimic(mimic_model, bnn, x_train, y_train=None, x_test=None, n_mc_sampl
 					The random forest will be trained on these examples and their
 					BNN predictions. The size of the second dimension must match the number of input dimensions expected by the BNN.
 		y_train: array of soft labels which are used to train the mimic model. Default is `None`, in which case the labels are generated
-					from `bnn`.
+					from `bnn`. This is useful if you want to train several mimic models without making new predictions.
 		x_test: array of test examples with shape (n_examples, n_features).
 					If provided (default is None) then the random forest will be
 					evaluated by comparing its predictions
