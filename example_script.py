@@ -1,13 +1,16 @@
 """
-Simulates binary classification datasets using latent functions with explicit functional forms
+Simulates binary classification datasets using latent functions with explicit latent functional forms
 and then trains a neural network and Bayesian neural network.
+
+Latent function is polynomial, which is thresholded to give binary labels. Threshold is random but 
+chosen such that the class imbalance is never more sever than 60/40.
 
 Variable importances are calculated using
 
 1. RATE (Bayesian neural network)
 2. Gradient-based methods, e.g. saliency map, integreated gradients etc... (neural network)
-4. Gini importance (random forest, gradient boosting machine)
-5. Gini importance of a tree ensemble mimic model (Bayesian neural network)
+3. Gini importance of a tree ensemble mimic model (Bayesian neural network)
+4. LASSO
 """
 import numpy as np
 import pandas as pd

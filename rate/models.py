@@ -14,8 +14,6 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from tensorflow.compat.v1.losses import mean_squared_error
 from tensorflow.nn import sigmoid_cross_entropy_with_logits, softmax_cross_entropy_with_logits_v2
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.models import Sequential
 
 from .utils import make_1d2d
 
@@ -24,12 +22,14 @@ logger = logging.getLogger(__name__)
 
 #
 # TODO: return samples from predict methods - done but not debugged
-# TODO: debug the predict functions properly - do this in notebook
 # TODO: replace fit checks with a decorator
 #
+
 def default_layers(p, C):
 	"""The default model layers - single 128-unit dense layer, batch normalization then a 
 	Bayesian DenseLocalReparameterization final layer.
+
+	If layers=[] in the constructor the network has this architecture
 	"""
 	layers = []
 	layers.append(tf.keras.layers.Dense(128, activation='relu', input_shape=(p,)))
@@ -44,10 +44,23 @@ TARGET_TYPES = {
 
 class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	"""Bayesian neural network base class.
+
+	This is an abstract class, so do not instantiate it directly - use BnnBinaryClassifier or BnnScalarRegressor
 	"""
 
 	@abstractmethod
 	def __init__(self, layers, optimiser_fn, metrics, n_mc_samples, verbose):
+		"""
+
+		Args:
+			layers: a list of network layers, the last of which should be a DenseLocalReparameterization layer
+			optimizer_fn: callable tensorflor optimizer
+			metrics: keras materics passed to keras method Sequential.compile - currently not fully supported
+					so control the metric using the argument to the .score function
+			n_mc_samples: the number of Monte Carlo samples used in any predictin function. This is the value
+					used by default but can be overriden using the n_mc_samples argument in (e.g.) predict
+			verbose: how much to print (0: nothing, 1: progress bar when predicting/fitting)
+		"""
 		self.layers = layers
 		self.optimiser_fn = optimiser_fn
 		self.metrics = metrics
@@ -67,12 +80,12 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		if len(self.layers) == 0:
 			logging.debug("No layers defined - using default architecture for {}".format(self.__class__.__name__))
 			self.layers = self._get_layers(X, y)
-		self._logit_model = Sequential()
+		self._logit_model = tf.keras.Sequential()
 		for l in self.layers[:-1]:
 			logger.debug("Adding layer {} to {}".format(l, self.__class__.__name__))
 			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - diesn't work with DenseLocalReparameterization layer for some reason
 		logger.debug("Adding DenseLocalReparameterization layer with {} units".format(self.layers[-1].units))
-		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use the mean-field approximation
+		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use M mean-field approximation
 		self.p = self._logit_model.layers[0].input_shape[1]
 		self.C = self._logit_model.layers[-1].units
 		logger.debug("Compiling logit model for {}...".format(self.__class__.__name__))
@@ -88,7 +101,7 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		Args:
 			X: array of examples with shape (n_examples, n_variables)
 			y: array of labels with shape (n_examples, 1)
-			**kwargs: passed to the Keras fit method
+			**kwargs: passed to the Keras fit method. See Keras docs for more details.
 
 		Returns:
 			The fitted model. Also stores the keras fit history as a class attribute.
@@ -113,15 +126,28 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	def _get_layers(self, X, y):
 		pass
 
-	def loss(self, X, y, n_mc_samples, mean_only=True, **kwargs):
+	def loss(self, X, y, n_mc_samples=None, mean_only=True, **kwargs):
 		"""Return the loss evaluated on examples X and labels y
+
+		Args:
+			X: examples (array with shape (n_examples, n_variables))
+			y: labels (array with shape (n_examples, n_output_classes))
+			n_mc_samples: number of Monte Carlo samples to use when evaluatingg the loss.
+						Default is None, which uses the number defined in the constructor
+			mean_only: whether to return the average loss over the Monte Carlo samples or
+					the samples values (default is True - return the mean only)
+			**kwargs: passed to Sequential.evaluate. See Keras docs for more details.
+
+		Returns:
+			The loss - float if n_mc_smaples=True otherwise array with shape n_mc_samples
+			of loss samples.
 
 		# TODO: separate loss and loss_samples methods?
 		"""
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Calculating the loss using {} MC samples".format(n_mc_samples))
 		loss_samples = np.array(
-			[self._logit_model.evaluate(X, y, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)])
+			[self._logit_model.evaluate(X, y, verbose=self.verbose, **kwargs)[0] for _ in range(n_mc_samples)])
 		if mean_only:
 			return loss_samples.mean(axis=0)
 		else:
@@ -133,6 +159,8 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 
 		Args:
 			X: input with shape (n_examples, n_input_dimensions)
+			**kwargs: passed to the Keras fit method. See Keras docs for more details.
+
 
 		Returns:
 			H: activations of the penultimate network layer, an array with shape (n_examples, penultimate_layer_size)
@@ -163,6 +191,9 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		"""The means and covariance of the posterior over the logits. Calculated using the variational
 		posterior over the final layer weights.
 
+		Args:
+			X: examples (array with shape (n_examples, n_variables))
+
 		TODO: shapes may break for C > 1
 
 		Returns:
@@ -184,6 +215,8 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		pass
 
 	def _elbo(self):
+		"""The evidence lower bound - sum of negative log likelihood and KL-divergence term
+		"""
 		return lambda y_true, logits: tf.reduce_sum(self._nll(y_true, logits)) + sum(self._logit_model.losses)/K.cast(K.shape(y_true)[0], "float32")
 
 	@abstractmethod
@@ -206,6 +239,11 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""
 
 	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=0):
+		"""Constructs a Bnn Binary Classifier. See BnnBase __init__ for the meanings of the arguments.
+		
+		This function contains some sensible defaults, including for the network architecture (the layers
+		argument) but it is better to specify your own architecture.
+		"""
 		super().__init__(
 			layers=layers,
 			optimiser_fn=optimiser_fn,
@@ -214,13 +252,26 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 			verbose=verbose)
 
 	def _nll(self, labels, logits):
-		"""Negative log likelihood - the reconstruction term in the ELBO
+		"""Negative log likelihood - the reconstruction term in the ELBO. It is a sigmoid cross entropy
+		for binary classification.
+
+		Returns:
+			The negative cross entropy tensorflow op
 		"""
 		return sigmoid_cross_entropy_with_logits(labels=labels, logits=logits)
 
 	def predict(self, X, n_mc_samples=None, **kwargs):
 		"""Predicted class labels over Monte Carlo samples. The mean prediction probability over the samples is
-		thresholded
+		thresholded (threshold is 0.5) to give class labels (as opposed to thresholding the sampled predicitons and then using the 
+		mode of the predicted labels).
+
+		Args:
+			X: examples (array with shape (n_examples, n_variables))
+			n_mc_samples: number of Monte Carlo samples. Default (None) uses the number defined in __init__
+			**kwargs: passed to keras predict(). See keras documentation for more info.
+
+		Returns:
+			Predicted class labels - an array with shape (n_examples, 1)	
 		"""
 		check_is_fitted(self, "_logit_model")
 		if X.ndim == 1:
@@ -232,7 +283,9 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		return (proba_preds.mean(axis=0) >= 0.5).astype(int)
 
 	def predict_proba(self, X, n_mc_samples=None, **kwargs):
-		"""Returns mean of predicted class probabilities over Monte Carlo samples
+		"""Returns mean of predicted class probabilities over Monte Carlo samples.
+
+		As predict but returns the predicted class probabilities
 		"""
 		logger.debug("Predicting mean class probabilities with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
 		proba_preds = self.predict_proba_samples(X, n_mc_samples, **kwargs)
@@ -242,6 +295,10 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		return default_layers(X.shape[1], 1)
 
 	def predict_proba_samples(self, X, n_mc_samples=None, **kwargs):
+		"""Return samples of predicted class probabilities for examples X.
+
+		As predict_proba but the raw samples are returned, not just the mean
+		"""
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Sampling predicted class probabilities with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
@@ -249,6 +306,17 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		return 1.0/(1.0+np.exp(-logit_preds))
 
 	def predict_samples(self, X, n_mc_samples=None, **kwargs):
+		"""Return sampled class labels for exampels X. The sampled predictions are thresholded (at 0.5) to give labels.,
+		which are returned.
+
+		Args:
+			X: examples, array with shape (n_examples, n_varialbes)
+			n_mc_samples: number of Monte Carlo samples. Default (None) uses the number defined in __init__
+			**kwargs: passed to keras predict(). See keras documentation for more info.			
+
+		Returns:
+			Sampled class labels, array with shape (n_examples, n_mc_samples)
+		"""
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Sampling predicted class labels with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
@@ -257,7 +325,21 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		return (proba_preds > 0.5).astype(int)
 
 	def score(self, X, y, metric="accuracy", n_mc_samples=None, **kwargs):
-		"""Score the model on its predictions of labels y from examples X
+		"""Score the model on its predictions of labels y from examples X. The scoring metric is controlled by the metric argument.
+
+		The two supported metrics (accuracy and area under ROC curve) use the sklearn.metric functions. **kwargs are
+		passed to these functions to control (e.g.) sample weight etc
+
+		Args:
+			X: array of examples with shape (n_examples, n_variables)
+			y: array of binary labels with shape (n_examples, 1)
+			metric: the scoring metric. Default is "accuracy", but can also use "auc" (for area under ROC curve) or any callable
+					function that takes arguments f(labels, prediction_probabilities, **kwargs)
+			n_mc_samples: number of Monte Carlo samples. Default (None) uses the number defined in __init__
+			**kwargs: passed to scoring metric.
+
+		Returns:
+			score as float
 		"""
 		if type_of_target(y) != self.target_type:
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
@@ -303,16 +385,3 @@ class BnnScalarRegressor(BnnBase, RegressorMixin):
 
 	def _get_layers(self, X, y):
 		return default_layers(X.shape[1], 1)
-
-def get_deterministic_nn(bnn):
-    """Returns a deterministic neural network with the same architecture as 
-    a given Bayesian neural network. Binary classification only!"""
-    if not isinstance(bnn, BnnBinaryClassifier):
-        raise ValueError("get_deterministic_nn is only for BnnBinaryClassifiers")
-    nn = Sequential()
-    for layer in bnn._logit_model.layers[:-1]:
-        nn.add(layer.__class__.from_config(layer.get_config()))
-    nn.add(Dense(bnn._logit_model.layers[-1].output_shape[1]))
-    nn.add(tf.keras.layers.Activation(activation="sigmoid"))
-    nn.compile(loss="binary_crossentropy", optimizer="Adam", metrics=["accuracy"])
-    return nn
