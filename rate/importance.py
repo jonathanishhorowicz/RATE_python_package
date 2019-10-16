@@ -88,7 +88,7 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 									)
 
 					KLDs[c][j] += 0.5 * (
-						- np.log(np.linalg.det(sigma_lambda_product))
+						- np.log(np.linalg.det(sigma_lambda_product) + 1e-9)
 						+ np.trace(sigma_lambda_product)
 						+ 1.0 - p)
 
