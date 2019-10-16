@@ -4,7 +4,7 @@ import time
 import rfpimp as rfp
 from tqdm import tqdm
 
-from .models import BnnBase
+from .models import BnnBase, BnnBinaryClassifier
 from .projections import CovarianceProjection
 from .logutils import TqdmLoggingHandler
 
@@ -14,9 +14,8 @@ logger.addHandler(TqdmLoggingHandler())
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-# TODO: add option for including log/trace term
-
-def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="KLD", jitter=1e-9, return_time=False, return_KLDs=False):
+def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
+	full_KLD=False, method="KLD", jitter=1e-9, return_time=False, return_KLDs=False):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
@@ -25,6 +24,7 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 		V_F: array containing logit posterior covariance, shape (n_classes, n_examples, n_examples).
 		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase. These are defined in projections.py
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
+		full_KLD: whether to include the log determinant, trace and 1-p terms in the KLD calculation. Default is False.
 		method: from when I was investigating the effect of the bug. Just use "KLD" (default), which is the correct RATE calculation
 		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness. The code will warn you if any of the resulting KLD values
 				are negative, in which case you should try a larger jitter. This is due to the covariance matrices of the logit posterior not being positive semi-definite.
@@ -49,7 +49,8 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
 
 	C = M_F.shape[0]
-	J = np.arange(X.shape[1])
+	p = X.shape[1]
+	J = np.arange(p)
 	if nullify is not None:
 		J = np.delete(J, nullify, axis=0)
 
@@ -73,11 +74,24 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, method="
 						Lambda_red,
 						rcond=None)[0])
 
+				# Approximation to the full KLD (equation S6 in AoAs supplemental)
 				if nullify is None:
 					KLDs[c][j] = 0.5 * m**2.0 * alpha
 				else:
 					KLDs[c][j] = 0.5 * np.matmul(np.matmul(m.T, alpha), m)
-                                                 
+
+				# Additional terms in the full KLD calculation (equation 9 in AoAS paper)
+				if full_KLD:
+					sigma_lambda_product = np.matmul(
+									np.delete(np.delete(V_B[c], j, axis=0), j, axis=1),
+									np.delete(np.delete(Lambda, j, axis=0), j, axis=1)
+									)
+
+					KLDs[c][j] += 0.5 * (
+						- np.log(np.linalg.det(sigma_lambda_product))
+						+ np.trace(sigma_lambda_product)
+						+ 1.0 - p)
+
 			elif method=="cond_var_red":
 				Sigma = V_B[c]
 				m = M_B[c,j]
@@ -126,7 +140,7 @@ def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=1
     so result is a 2-tuple (array of importance values, time)
 
 	Args:
-		model: a BNN_Classifier, RandomForestClassifier or GradientBoostingClassifier
+		model: a BnnBinaryClassifier, RandomForestClassifier or GradientBoostingClassifier
 		X, y: examples and labels. The permutation importances are computed by shuffling columns
 			  of X and seeing how the prediction accuracy for y is affected
 		features: How many features to compute importances for. Default (None) is to compute
@@ -144,7 +158,7 @@ def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=1
 	if n_examples is None:
 		n_examples = -1
 	start_time = time.time()
-	if isinstance(model, BNN_Classifier):
+	if isinstance(model, BnnBinaryClassifier):
 		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df,
 								metric=lambda model, X, y, sw: model.score(X, y, n_mc_samples, sample_weight=sw), n_samples=n_examples, sort=False).values)
 	elif isinstance(model, RandomForestClassifier) or isinstance(model, GradientBoostingClassifier):

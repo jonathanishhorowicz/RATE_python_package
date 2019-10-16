@@ -23,7 +23,7 @@ def cross_validate_bnn(layer_list, X, y, k,
         k: integer specifying the number of folds to use in the cross-validation
         init_args: kwargs passed to the BNN __init__ method
         fit_args: kwargs passed to the fit method of the BNN
-        score_args: kwargs passed to the score method of the BNN
+        score_args: kwargs passed to the score method of the BNN. Controls the scoring metric (accuracy or auc)
         n_jobs: number of workers to parallise the fits over. Not currently implemented.
     """
 
@@ -32,6 +32,7 @@ def cross_validate_bnn(layer_list, X, y, k,
         
     target_type = type_of_target(y)
     logger.info("Running cross-validation over {} BNNs with {} targets".format(len(layer_list), target_type))
+    logger.debug("init_args: {}\n, fit_args: {}\n, score_args: {}\n".format(init_args, fit_args, score_args))
     if target_type=="binary":
         bnn_init = BnnBinaryClassifier
     elif target_type=="continuous":
@@ -55,7 +56,6 @@ def cross_validate_bnn(layer_list, X, y, k,
     # Refit the best model on the whole dataset
     best_model_idx = val_score_grid.mean(axis=1).argmax()
     logger.info("Model {} had the largest mean validation metric: {:.3f} pm {:.3f} (mean pm std over {} folds)".format(
-
         best_model_idx,
         val_score_grid.mean(axis=1)[best_model_idx],
         val_score_grid.std(axis=1)[best_model_idx],
