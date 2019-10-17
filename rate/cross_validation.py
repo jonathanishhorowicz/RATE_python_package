@@ -29,7 +29,10 @@ def cross_validate_bnn(layer_list, X, y, k,
 
     if X.shape[0] != y.shape[0]:
         raise ValueError("X and y do not have the same number of observations")
-        
+
+    if len(layer_list)==1:
+        raise ValueError("For cross-validation please provide more than one possible architecture")
+
     target_type = type_of_target(y)
     logger.info("Running cross-validation over {} BNNs with {} targets".format(len(layer_list), target_type))
     logger.debug("init_args: {}\n, fit_args: {}\n, score_args: {}\n".format(init_args, fit_args, score_args))
