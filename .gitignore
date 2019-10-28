@@ -2,3 +2,5 @@ rate/__pycache__/*
 dist/*
 rate.egg-info/*
 build/*
+tests/__pycache__/*
+__pycache__
