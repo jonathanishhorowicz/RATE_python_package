@@ -74,7 +74,7 @@ class PseudoinverseProjection(ProjectionBase):
 
 		Args:
 			X: array of inputs with shape (n_examples, n_variables)
-			M_F: array of logit posterior means with shape (n_examples, n_classes)
+			M_F: array of logit posterior means with shape (n_classes, n_examples)
 			V_F: array of logit posterior covariances with shape (n_classes, n_examples, n_examples)
 		
 		Returns:

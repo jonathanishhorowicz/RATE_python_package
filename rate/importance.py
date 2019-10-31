@@ -110,7 +110,7 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase. These are defined in projections.py
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
 		exact_KLD: whether to include the log determinant, trace and 1-p terms in the KLD calculation. Default is False.
-		method: from when I was investigating the effect of the bug. Just use "KLD" (default), which is the correct RATE calculation
+		method: from when I was investigating the effect of the bug. Use "KLD" (default) for the correct RATE calculation and "MI" for the mutual information.
 		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness. The code will warn you if any of the resulting KLD values
 				are negative, in which case you should try a larger jitter. This is due to the covariance matrices of the logit posterior not being positive semi-definite.
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
@@ -123,14 +123,20 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		If return_KLDs=True then the first item of the 2-tuple is itself a 2-tuple of (RATE_values, KLD_values)
 	"""
 
+	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
+	logger.debug("Using {} method".format(method))
+
+	if M_F.ndim==1 and V_F.ndim==2:
+		M_F = M_F[np.newaxis,:]
+		V_F = V_F[np.newaxis,:,:]
+		logger.debug("Reshaping M_F to {} and V_F to {}".format(M_F.shape, V_F.shape))
+
 	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
 		raise ValueError("Inconsistent number of examples across X and logit posterior")
 	if M_F.shape[0] != V_F.shape[0]:
 		raise ValueError("Inconsistent number of classes between logit posterior mean and covariance")
 
 	logger.info("Calculating RATE values for {} classes, {} examples and {} variables".format(M_F.shape[0], X.shape[0], X.shape[1]))
-	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
-	logger.debug("Using {} method".format(method))
 
 	# PARALLELISATION NOT FULLY TESTED YET - CALL RATE_ray directly
 	# if n_jobs > 1:
@@ -209,6 +215,8 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 						rcond=None)[0])
 				KLDs[c][j] = -0.5 * np.log(1.0 - alpha/Sigma[j,j])
 
+	logger.debug("{} of the KLD values are negative and {} of them are nan".format(np.sum(np.array(KLDs)<0.0), np.isnan(KLDs).sum()))
+
 	if (np.array(KLDs) < 0.0).any():
 		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
                                                  
@@ -219,7 +227,8 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 
 	if C==1:
 		out = out[0]
-		
+		KLDs = KLDs[0]
+
 	if return_KLDs:
 		out = [out, KLDs]
 	if return_time:
