@@ -11,8 +11,10 @@ def test_r_wrapping():
 	f_draws = np.random.multivariate_normal(np.zeros(n), np.eye(n, n), size=(n_draws))
 
 	rate_r = init_rate_r()
-	out = rate_r(X, f_draws)
-	assert out[0].shape[0]==p
-	assert out[1].shape[0]==p
-	assert isinstance(out[2], float)
-	assert isinstance(out[3], float)
+	for args in [("covariance", True), ("covariance", False), ("linear", True), ("linear", False)]:
+		out = rate_r(X, f_draws, args[0], args[1])
+		assert out[0].shape[0]==p
+		assert out[1].shape[0]==p
+		assert isinstance(out[2], float)
+		assert isinstance(out[3], float)
+		assert out[0].sum()==1.0
