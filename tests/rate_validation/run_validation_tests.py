@@ -34,7 +34,7 @@ def make_plot(n_draw_vals, norms, pearsons_rho, spearmans_rho, filename):
 # Settings
 #
 n, p = 100, 10
-n_draw_vals = [100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]
+n_draw_vals = [100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000, 3000000]
 n_repeats = 10
 
 rate_r_func = init_rate_r() # initialise R code
