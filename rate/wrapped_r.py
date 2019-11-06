@@ -2,12 +2,12 @@ import numpy as np
 import rpy2.robjects as robjects
 from rpy2.robjects.numpy2ri import activate
 
-import pkg_resources
-
 def init_rate_r():
 	"""Returns a python function that calls Lorin's original R code under the hood.
 
-	The resulting function onl. uses the X, f.draws and projection arguments.
+	The resulting function only uses the X, f.draws and projection arguments.
+
+	This is only used for validating the Python code against in the unit tests.
 
 	Example usage:
 		n, p = 100, 10

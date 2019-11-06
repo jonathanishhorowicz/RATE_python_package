@@ -44,15 +44,15 @@ class CovarianceProjection(ProjectionBase):
 		if self._X is None:
 			logger.debug("No X is cached - calculating centered X and storing it")
 			self._X = X
-			self._X_c = X - X.mean(axis=0)[np.newaxis,:]
+			self._X_c = X - X.mean(axis=0, keepdims=True)
 		elif not np.array_equal(self._X, X):
 			logger.debug("Does not match cached X: calculating new centered X and storing it")
 			self._X = X
-			self._X_c = X - X.mean(axis=0)[np.newaxis,:]
+			self._X_c = X - X.mean(axis=0, keepdims=True)
 
 		n = self._X.shape[0]
 		logger.debug("n = {}".format(n))
-		M_F_c = M_F - M_F.mean(axis=1)
+		M_F_c = M_F - M_F.mean(axis=1, keepdims=True)
 		logger.debug("M_F_c has shape {}, self._X has shape {}, self._X_c has shape {}".format(M_F_c.shape, self._X.shape, self._X_c.shape))
 		M_B = 1.0/(n-1.0) * np.matmul(self._X_c.T, M_F_c[:,:,np.newaxis])[:,:,0]
 		# M_B = 1.0/(n-1.0) * np.einsum('ij,kj -> ik', M_F_c) check if these two lines are equivalent

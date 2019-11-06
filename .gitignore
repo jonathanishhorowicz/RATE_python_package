@@ -1,6 +1,7 @@
-rate/__pycache__/*
+rate/__pycache__/
 dist/*
 rate.egg-info/*
 build/*
-tests/__pycache__/*
-__pycache__
+tests/__pycache__/
+__pycache__/
+deprecated/

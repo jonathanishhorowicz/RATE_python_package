@@ -98,7 +98,14 @@ def RATE_ray(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		out = [out, rate_time]
 	return out
 
-def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
+def RATE2(*args, **kwargs):
+	"""Wrapper for RATE - RATE2 was the development function name.
+
+	For supporting older notebooks, scripts etc"""
+	logger.warning("RATE2 is deprecated - please use rate")
+	return RATE(*args, **kwargs)
+
+def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
 	exact_KLD=False, method="KLD", jitter=1e-9, return_time=False, return_KLDs=False,
 	n_jobs=1, parallel_backend=""):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
@@ -110,12 +117,12 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		projection: an projection defining the effect size analogue. Must inherit from ProjectionBase. These are defined in projections.py
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
 		exact_KLD: whether to include the log determinant, trace and 1-p terms in the KLD calculation. Default is False.
-		method: from when I was investigating the effect of the bug. Use "KLD" (default) for the correct RATE calculation and "MI" for the mutual information.
+		method: Used in development. Use "KLD" (default) for the RATE calculation.
 		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness. The code will warn you if any of the resulting KLD values
 				are negative, in which case you should try a larger jitter. This is due to the covariance matrices of the logit posterior not being positive semi-definite.
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 		return KLDs: whether to return the KLD values as well as the RATE values. For debugging. Default is False.
-		parallel_backend: the parallel backend (only relevant if n_jobs > 1). One of 'ray' or 'multiprocesing'
+		parallel_backend: the parallel backend (only relevant if n_jobs > 1). One of 'ray' or 'multiprocessing'
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
@@ -126,10 +133,16 @@ def RATE2(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
 	logger.debug("Using {} method".format(method))
 
-	if M_F.ndim==1 and V_F.ndim==2:
-		M_F = M_F[np.newaxis,:]
-		V_F = V_F[np.newaxis,:,:]
-		logger.debug("Reshaping M_F to {} and V_F to {}".format(M_F.shape, V_F.shape))
+	#
+	# Shape checks. 1D M_F and 2D V_F will have extra dimension added at the front (for the output class)
+	#
+	if M_F.ndim==1 :
+		M_F = M_F[np.newaxis]
+		logger.debug("Reshaping 1D M_F to {}".format(M_F.shape))
+
+	if V_F.ndim==2:
+		V_F = V_F[np.newaxis]
+		logger.debug("Reshaping 2D V_F to {}".format(V_F.shape))
 
 	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
 		raise ValueError("Inconsistent number of examples across X and logit posterior")
@@ -266,242 +279,3 @@ def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=1
 		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df, n_samples=n_examples, sort=False).values)
 	time_taken = time.time() - start_time
 	return imp_vals, time_taken
-
-# ****************************************************************************************************
-# ****************************************************************************************************
-# ************************ DEPRECATED CODE BELOW THIS POINT - WILL BE REMOVED ************************
-# ****************************************************************************************************
-# ****************************************************************************************************
-    
-def RATE_sequential(mu_c, Lambda_c, nullify=None):
-    """
-	Compute RATE values fromt means and covariances of the effect
-	size analgoues of a single class.
-
-	Args:
-		mu_c: Array of means of the effect size analgoues with shape (n_variables,).
-		Lambda_c: Array of covariances of the effect size analogues with shape (n_variables, n_variables)
-		nullify: Array of indices to be ignored (default None means include all variables).
-
-	Returns:
-		Array of RATE values with shape (n_variables,)
-    """
-
-    mu = mu_c
-    Lambda = Lambda_c
-    
-    J = np.arange(Lambda.shape[0])
-    if nullify is not None:
-        J = np.delete(J, nullify, axis=0)
-
-    print("Computing RATE with {} variables".format(J.shape[0]))
-    print("Variable #:", end=" ")
-    
-    def single_marker_kld(j):
-        
-        if j%100==0:
-            print(j, end=" ")
-        
-        if nullify is not None:
-            j = np.array(np.unique(np.concatenate(([j], nullify)), axis=0))
-        m = mu[j]
-        Lambda_red = np.delete(Lambda, j, axis=0)[:,j]
-        
-        # in def'n of alpha below, 
-        # changing np.linalg.solve to np.linalg.lstsq with rcond=None, to avoid singularity error 
-        # when simulating data in Power Simulation Response to ICML Feedback.ipynb
-        # (dana)
-        alpha = np.matmul(Lambda_red.T, 
-                          np.linalg.lstsq(np.delete(np.delete(Lambda, j, axis=0), j, axis=1),
-                                          Lambda_red, rcond=None)[0])
-        if nullify is None:
-            return 0.5 * m**2.0 * alpha
-        else:
-            return 0.5 * np.matmul(np.matmul(m.T, alpha), m)
-    
-    KLD = [single_marker_kld(j) for j in J]
-    print("done")
-    return KLD / np.sum(KLD)
-
-def groupRATE_sequential(mu_c, Lambda_c, groups, nullify=None):
-	"""
-	Group RATE
-
-	Args:
-		groups: List of lists, where groups[i] contains the indices of the variables in group i
-	"""
-	mu = mu_c
-	Lambda = Lambda_c
-    
-	J = np.arange(Lambda.shape[0])
-	if nullify is not None:
-		J = np.delete(J, nullify, axis=0)
-
-	print("Computing RATE with {} groups".format(len(groups)))
-	print("Group #:", end=" ")
-
-	def group_kld(group, idx):
-		if idx%100 == 0:
-			print(idx, end=", ")
-
-		if nullify is not None:
-			j = np.array(np.unique(np.concatenate((group, nullify)), axis=0))
-		else:
-			j = group
-		m = mu[j]
-		Lambda_red = np.delete(Lambda, j, axis=0)[:,j]
-
-		# in def'n of alpha below, 
-		# changing np.linalg.solve to np.linalg.lstsq with rcond=None, to avoid singularity error 
-		# when simulating data in Power Simulation Response to ICML Feedback.ipynb
-		# (dana)
-		alpha = np.matmul(Lambda_red.T, 
-							np.linalg.lstsq(np.delete(np.delete(Lambda, j, axis=0), j, axis=1),
-											Lambda_red, rcond=None)[0])
-		if nullify is None:
-			return 0.5 * m**2.0 * alpha
-		else:
-			return 0.5 * np.matmul(np.matmul(m.T, alpha), m)
-
-	KLD = [group_kld(group, idx) for idx, group in enumerate(groups)]
-	print("done")
-	return KLD, KLD/np.sum(KLD)
-
-# Worker initialisation and function for groupRATE
-var_dict = {}
-
-def init_worker(mu, Lambda, p):
-	var_dict["mu"] = mu
-	var_dict["Lambda"] = Lambda
-	var_dict["p"] = p
-
-def worker_func(worker_args):
-	"""
-	Returns KLD
-	"""
-	j, idx, filepath = worker_args
-	Lambda_np = np.frombuffer(var_dict["Lambda"]).reshape(var_dict["p"], var_dict["p"])
-	mu_np = np.frombuffer(var_dict["mu"])
-	m = mu_np[j]
-	Lambda_red = np.delete(Lambda_np, j, axis=0)[:,j]
-
-	alpha = np.matmul(Lambda_red.T, 
-					  np.linalg.lstsq(np.delete(np.delete(Lambda_np, j, axis=0), j, axis=1),
-									  Lambda_red, rcond=None)[0])
-
-	if isinstance(m, float):
-		out = 0.5 * m**2.0 * alpha
-	else:
-		out = 0.5 * np.matmul(np.matmul(m.T, alpha), m)
-	
-	if filepath is not None:
-		with open(filepath + "kld_{}.csv".format(idx), "w") as f:
-			f.write(str(out))
-
-	return out
-
-def RATE(mu_c, Lambda_c, nullify=None, n_workers=1, filepath=None):
-	if nullify is not None and n_workers > 1:
-		logging.warning("Using nullify means a sequential RATE calculation")
-		n_workers = 1
-	
-	if n_workers == 1:
-		return RATE_sequential(mu_c, Lambda_c, nullify)
-    
-	p = mu_c.shape[0]
-    
-	print("Computing RATE for {} variables using {} worker(s)".format(p, n_workers))
-
-	# Setup shared arrays
-	mu_mp = mp.RawArray('d', p)    
-	Lambda_mp = mp.RawArray('d', p*p)
-	mu_np = np.frombuffer(mu_mp, dtype=np.float64)
-	Lambda_np = np.frombuffer(Lambda_mp, dtype=np.float64).reshape(p, p)
-	np.copyto(mu_np, mu_c)
-	np.copyto(Lambda_np, Lambda_c)
-
-    # Run pooled computation
-	with mp.Pool(processes=n_workers, initializer=init_worker, initargs=(mu_c, Lambda_c, p)) as pool:
-		result = np.array(pool.map(worker_func, [(j, j, filepath) for j in range(p)]))
-	return result/result.sum()
-
-def groupRATE(mu_c, Lambda_c, groups, nullify=None, n_workers=1, filepath=None):
-    if nullify is not None and n_workers > 1:
-        logging.warning("Using nullify means a sequential groupRATE calculation")
-        n_workers = 1
-
-    if n_workers == 1:
-        return groupRATE_sequential(mu_c, Lambda_c, groups, nullify)
-    
-    p = mu_c.shape[0]
-    
-    # Setup shared arrays
-    mu_mp = mp.RawArray('d', p)    
-    Lambda_mp = mp.RawArray('d', p*p)
-    mu_np = np.frombuffer(mu_mp, dtype=np.float64)
-    Lambda_np = np.frombuffer(Lambda_mp, dtype=np.float64).reshape(p, p)
-    np.copyto(mu_np, mu_c)
-    np.copyto(Lambda_np, Lambda_c)
-        
-    # Run pooled computation
-    with mp.Pool(processes=n_workers, initializer=init_worker, initargs=(mu_c, Lambda_c, p)) as pool:
-        result = np.array(pool.map(worker_func, [(group, idx, filepath) for idx, group in enumerate(groups)]))
-    return result/result.sum()
-
-# TODO: THIS RETURNS AN ARRAY WITH AN EXTRA AXIS IF C=1
-def RATE_BNN(bnn, X, groups=None, nullify=None, effect_size_analogue="covariance",
-	n_workers=1, return_esa_posterior=False, filepath=None):
-	"""
-	Compute RATE values for the Bayesian neural network described in (Ish-Horowicz et al., 2019).
-	If C>2 there is one RATE value per pixel per class. Note that a binary classification task
-	uses C=1 as there is a single output node in the network.
-
-	This function wraps compute_B (which computes effect size analgoues) and RATE.
-
-	Args:
-		bnn: BNN object
-		X: array of inputs with shape (n_examples, n_input_dimensions)
-		groups: A list of lists where groups[i] is a list of indices of the variables in group i. Default is None (no group RATE)
-		effect_size_analogue: Projection operator for computing effect size analogues. Either "linear" (pseudoinverse) or "covariance" (default).
-		n_workers: number of workers for groupRATE
-        return_esa_posterior: Controls whether the mean/covariance of the effect size analgoue posterior is also returned (default False)
-        filepath: where to save the result of each worker (None means no saving and is the default)
-		
-	Returns:
-		Tuple of (rate_vales, computation_time)
-		If groups is None: rate_vales is a list of arrays of RATE values with length C. Each array in the list has shape (n_variables,).
-		Otherwise, each array in rate_values has length len(groups).
-	"""
-	C = bnn.C
-	M_W, V_W, b = bnn.var_params()
-	H = bnn.H(X)
-
-	start_time = time.time()
-
-	M_B, V_B = compute_B(X, H, M_W, V_W, b, C, effect_size_analogue)
-
-	try:
-		if C > 2:
-			if groups is None:
-				out = [RATE(mu_c=M_B[c,:],Lambda_c=V_B[c,:,:], nullify=nullify, n_workers=n_workers, filepath=filepath) for c in range(C)]
-			else:
-				out = [groupRATE(mu_c=M_B[c,:],Lambda_c=V_B[c,:,:], groups=groups, nullify=nullify, n_workers=n_workers, filepath=filepath) for c in range(C)]
-			rate_time = time.time() - start_time
-		else:
-			if groups is None:
-				out = RATE(mu_c=M_B[0,:],Lambda_c=V_B[0,:,:], nullify=nullify, n_workers=n_workers, filepath=filepath)
-			else:
-				out = groupRATE(mu_c=M_B[0,:],Lambda_c=V_B[0,:,:], groups=groups, nullify=nullify, n_workers=n_workers, filepath=filepath)
-			rate_time = time.time() - start_time
-	except np.linalg.LinAlgError as err: # Redo this
-		if 'Singular matrix' in str(err):
-			logging.info("Computing RATE led to singlar matrices. Try using the nullify argument to ignore uninformative variables.")
-			logging.error("Singular matrix", exc_info=True)
-		else:
-			raise err
-            
-	if return_esa_posterior:
-		return out, rate_time, M_B, V_B
-	else:
-		return out, rate_time
-
