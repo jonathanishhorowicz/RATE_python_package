@@ -59,7 +59,8 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 					so control the metric using the argument to the .score function
 			n_mc_samples: the number of Monte Carlo samples used in any predictin function. This is the value
 					used by default but can be overriden using the n_mc_samples argument in (e.g.) predict
-			verbose: how much to print (0: nothing, 1: progress bar when predicting/fitting)
+			verbose: how much to print (0: nothing, 1: progress bar when predicting/fitting). This is the default
+					value but can be overridden in individual function calls.
 		"""
 		self.layers = layers
 		self.optimiser_fn = optimiser_fn
@@ -83,16 +84,16 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		self._logit_model = tf.keras.Sequential()
 		for l in self.layers[:-1]:
 			logger.debug("Adding layer {} to {}".format(l, self.__class__.__name__))
-			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - diesn't work with DenseLocalReparameterization layer for some reason
+			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - doesn't work with DenseLocalReparameterization layer for some reason
 		logger.debug("Adding DenseLocalReparameterization layer with {} units".format(self.layers[-1].units))
-		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use M mean-field approximation
+		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use mean-field approximation
 		self.p = self._logit_model.layers[0].input_shape[1]
 		self.C = self._logit_model.layers[-1].units
 		logger.debug("Compiling logit model for {}...".format(self.__class__.__name__))
 		self._logit_model.compile(loss=self._elbo(), optimizer=self.optimiser_fn(), metrics=self.metrics)
 		self._hmodel = tf.keras.Model(self._logit_model.input , self._logit_model.layers[-2].output)
 
-		self.metrics_names = self._logit_model.metrics_names # To make sklearn cross-validation work
+		self.metrics_names = self._logit_model.metrics_names # To make sklearn cross-validation work - deprecated - will remove
 		logger.debug("{} logit model was compiled with the following metrics: {}".format(self.__class__.__name__, self.metrics_names))
 
 	def fit(self, X, y, **kwargs):
@@ -119,7 +120,8 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 			raise ValueError("Model expects {} input dimensions, not {}".format(self.p, X.shape[1]))
 		self._check_labels(y)
 		# TODO: check optimizer here
-		self.fit_history = self._logit_model.fit(X, y, verbose=self.verbose, **kwargs)
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		self.fit_history = self._logit_model.fit(X, y, verbose=verbosity, **kwargs)
 		return self
 
 	@abstractmethod
@@ -146,8 +148,9 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		"""
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Calculating the loss using {} MC samples".format(n_mc_samples))
+		verbosity, kwargs = self._check_verbosity(kwargs)
 		loss_samples = np.array(
-			[self._logit_model.evaluate(X, y, verbose=self.verbose, **kwargs)[0] for _ in range(n_mc_samples)])
+			[self._logit_model.evaluate(X, y, verbose=verbosity, **kwargs)[0] for _ in range(n_mc_samples)])
 		if mean_only:
 			return loss_samples.mean(axis=0)
 		else:
@@ -167,7 +170,8 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		"""
 		logger.debug("Calculating H for X with shape {}".format(X.shape))
 		check_is_fitted(self, "_logit_model")
-		return self._hmodel.predict(X, verbose=self.verbose, **kwargs)
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		return self._hmodel.predict(X, verbose=verbosity, **kwargs)
 
 	def var_params(self):
 		"""The variational parameters of the final layer weights (the bias is deterministic but is
@@ -233,6 +237,13 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	# 	return self.score(X, y, **kwargs)
 	# Maybe better not to use this method due to possible confusion between keras and sklearn APIs
 
+	def _check_verbosity(self, kwargs):
+		if 'verbose' in kwargs:
+			verbosity = kwargs.pop('verbose')
+			return verbosity, kwargs
+		else:
+			return self.verbose, kwargs
+
 
 class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""Bayesian neural network for binary classification
@@ -278,7 +289,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 			X = make_1d2d(X)
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Predicting mean class labels with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)]))
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=verbosity, **kwargs) for _ in range(n_mc_samples)]))
 		proba_preds = 1.0/(1.0+np.exp(-logit_preds))
 		return (proba_preds.mean(axis=0) >= 0.5).astype(int)
 
@@ -288,7 +300,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		As predict but returns the predicted class probabilities
 		"""
 		logger.debug("Predicting mean class probabilities with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		proba_preds = self.predict_proba_samples(X, n_mc_samples, **kwargs)
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		proba_preds = self.predict_proba_samples(X, n_mc_samples, verbose=verbosity, **kwargs)
 		return proba_preds.mean(axis=0)
 
 	def _get_layers(self, X, y):
@@ -302,7 +315,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Sampling predicted class probabilities with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)]))
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=verbosity, **kwargs) for _ in range(n_mc_samples)]))
 		return 1.0/(1.0+np.exp(-logit_preds))
 
 	def predict_samples(self, X, n_mc_samples=None, **kwargs):
@@ -320,11 +334,12 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Sampling predicted class labels with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)]))
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		logit_preds = np.squeeze(np.array([self._logit_model.predict(X, verbose=verbosity, **kwargs) for _ in range(n_mc_samples)]))
 		proba_preds = 1.0/(1.0+np.exp(-logit_preds))
 		return (proba_preds > 0.5).astype(int)
 
-	def score(self, X, y, metric="accuracy", n_mc_samples=None, **kwargs):
+	def score(self, X, y, metric="accuracy", n_mc_samples=None, predict_args={}, **kwargs):
 		"""Score the model on its predictions of labels y from examples X. The scoring metric is controlled by the metric argument.
 
 		The two supported metrics (accuracy and area under ROC curve) use the sklearn.metric functions. **kwargs are
@@ -336,7 +351,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 			metric: the scoring metric. Default is "accuracy", but can also use "auc" (for area under ROC curve) or any callable
 					function that takes arguments f(labels, prediction_probabilities, **kwargs)
 			n_mc_samples: number of Monte Carlo samples. Default (None) uses the number defined in __init__
-			**kwargs: passed to scoring metric.
+			predict_args: keyword-value pairs passed to predict/predict_proba.
+			**kwargs: keyword-value pairs passed to metric.
 
 		Returns:
 			score as float
@@ -344,11 +360,11 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		if type_of_target(y) != self.target_type:
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
 		if metric=="accuracy":
-			return accuracy_score(y, self.predict(X, n_mc_samples), **kwargs)
+			return accuracy_score(y, self.predict(X, n_mc_samples, **predict_args), **kwargs)
 		elif metric=="auc":
-			return roc_auc_score(y, self.predict_proba(X, n_mc_samples), **kwargs)
+			return roc_auc_score(y, self.predict_proba(X, n_mc_samples, **predict_args), **kwargs)
 		elif callable(metric):
-			return metric(y, self.predict_proba(X, n_mc_samples), **kwargs)
+			return metric(y, self.predict_proba(X, n_mc_samples, **predict_args), **kwargs)
 		else:
 			raise ValueError("metric must be either 'accuracy', 'auc' or callable")
 
@@ -375,13 +391,15 @@ class BnnScalarRegressor(BnnBase, RegressorMixin):
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Predicting mean response with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		return np.mean([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)], axis=0)
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		return np.mean([self._logit_model.predict(X, verbose=verbosity, **kwargs) for _ in range(n_mc_samples)], axis=0)
 
 	def predict_samples(self, X, n_mc_samples=None, **kwargs):
 		check_is_fitted(self, "_logit_model")
 		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
 		logger.debug("Sampling predicted response with X shape {} and {} MC samples".format(X.shape, n_mc_samples))
-		return np.array([self._logit_model.predict(X, verbose=self.verbose, **kwargs) for _ in range(n_mc_samples)])
+		verbosity, kwargs = self._check_verbosity(kwargs)
+		return np.array([self._logit_model.predict(X, verbose=verbosity, **kwargs) for _ in range(n_mc_samples)])
 
 	def _get_layers(self, X, y):
 		return default_layers(X.shape[1], 1)

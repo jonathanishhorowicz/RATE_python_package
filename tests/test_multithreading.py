@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 
 from rate.models import BnnBinaryClassifier
-from rate.importance import RATE2, RATE_ray
+from rate.importance import rate, RATE_ray
 
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
@@ -25,7 +25,7 @@ def test_ray():
 		bnn = BnnBinaryClassifier(verbose=0).fit(X_train, y_train)
 		M_F, V_F = bnn.logit_posterior(X_test)
 
-		seq_result = RATE2(X_test, M_F, V_F)
+		seq_result = rate(X_test, M_F, V_F)
 		ray_seq_result = RATE_ray(X_test, M_F, V_F, n_jobs=1)
 		ray_par_result = RATE_ray(X_test, M_F, V_F, n_jobs=2)
 		assert np.array_equal(seq_result, ray_seq_result)

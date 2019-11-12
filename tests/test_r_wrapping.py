@@ -17,4 +17,4 @@ def test_r_wrapping():
 		assert out[1].shape[0]==p
 		assert isinstance(out[2], float)
 		assert isinstance(out[3], float)
-		assert out[0].sum()==1.0
+		assert 1.0 - out[0].sum() < 1e-9
