@@ -12,6 +12,9 @@ Alternatively, use `pip install git+https://github.com/jonathanishhorowicz/RATE_
 
 See the [requirements](requirements.txt). 
 
+# Examples
+
+For an example of the functionality please see the [examples](examples).
 
 # Relevant Citations
 
