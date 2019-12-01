@@ -13,7 +13,7 @@ Alternatively, use `pip install git+https://github.com/jonathanishhorowicz/RATE_
 See the [requirements](requirements.txt). 
 
 
-### Relevant Citations
+# Relevant Citations
 
 J. Ish-Horowicz*, D. Udwin*, S.R. Flaxman, S.L. Filippi, and L. Crawford (2019). Interpreting deep neural networks through variable importance. _arXiv_. 1901.09839.
 
