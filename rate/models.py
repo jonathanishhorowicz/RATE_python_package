@@ -10,6 +10,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted
 from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import mean_squared_error as mean_squared_error_score
 
 from tensorflow.compat.v1.losses import mean_squared_error
 from tensorflow.nn import sigmoid_cross_entropy_with_logits, softmax_cross_entropy_with_logits_v2
@@ -221,7 +222,7 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	def _elbo(self):
 		"""The evidence lower bound - sum of negative log likelihood and KL-divergence term
 		"""
-		return lambda y_true, logits: tf.reduce_sum(self._nll(y_true, logits)) + sum(self._logit_model.losses)/K.cast(K.shape(y_true)[0], "float32")
+		return lambda y_true, logits: self._nll(y_true, logits) + sum(self._logit_model.losses)/K.cast(K.shape(y_true)[0], "float32")
 
 	@abstractmethod
 	def predict_samples(self, X, n_mc_samples=None, **kwargs):
@@ -269,7 +270,7 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		Returns:
 			The negative cross entropy tensorflow op
 		"""
-		return sigmoid_cross_entropy_with_logits(labels=labels, logits=logits)
+		return tf.reduce_mean(sigmoid_cross_entropy_with_logits(labels=labels, logits=logits))
 
 	def predict(self, X, n_mc_samples=None, **kwargs):
 		"""Predicted class labels over Monte Carlo samples. The mean prediction probability over the samples is
@@ -345,6 +346,8 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		The two supported metrics (accuracy and area under ROC curve) use the sklearn.metric functions. **kwargs are
 		passed to these functions to control (e.g.) sample weight etc
 
+		TODO: handle nan in predictions
+
 		Args:
 			X: array of examples with shape (n_examples, n_variables)
 			y: array of binary labels with shape (n_examples, 1)
@@ -360,9 +363,17 @@ class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 		if type_of_target(y) != self.target_type:
 			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
 		if metric=="accuracy":
-			return accuracy_score(y, self.predict(X, n_mc_samples, **predict_args), **kwargs)
+			yhat = self.predict(X, n_mc_samples, **predict_args)
+			if np.isfinite(yhat).all():
+				return accuracy_score(y, yhat, **kwargs)
+			else:
+				raise FloatingPointError("non-finite values in network prediction")
 		elif metric=="auc":
-			return roc_auc_score(y, self.predict_proba(X, n_mc_samples, **predict_args), **kwargs)
+			yhat = self.predict_proba(X, n_mc_samples, **predict_args)
+			if np.isfinite(yhat).all():
+				return roc_auc_score(y, yhat, **kwargs)
+			else:
+				raise FloatingPointError("non-finite values in network prediction")
 		elif callable(metric):
 			return metric(y, self.predict_proba(X, n_mc_samples, **predict_args), **kwargs)
 		else:
@@ -403,3 +414,9 @@ class BnnScalarRegressor(BnnBase, RegressorMixin):
 
 	def _get_layers(self, X, y):
 		return default_layers(X.shape[1], 1)
+
+	def score(self, X, y, n_mc_samples=None):
+		if type_of_target(y) != self.target_type:
+			raise ValueError("Label type is {} but model expects {}".format(type_of_target(y), self.target_type))
+		if n_mc_samples is None: n_mc_samples = self.n_mc_samples
+		return mean_squared_error_score(y, self.predict(X, n_mc_samples))

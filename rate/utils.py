@@ -11,11 +11,13 @@ import time
 import logging
 logger = logging.getLogger(__name__)
 
-def plot_learning_curves(bnn):
-
-	fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-
+def plot_learning_curves(bnn, plotsize=4):
+    
 	total_epochs = len(bnn.fit_history.history["loss"])
+
+	fig, axes = plt.subplots(
+		1, len(bnn.metrics_names),
+		figsize=(len(bnn.metrics_names)*plotsize, plotsize))
 
 	axes[0].plot(range(total_epochs), bnn.fit_history.history["loss"], '-o', label="training")
 	if 'val_loss' in bnn.fit_history.history:
@@ -24,16 +26,18 @@ def plot_learning_curves(bnn):
 	axes[0].set_ylabel("ELBO")
 	axes[0].set_xlabel("epoch")
 
-	axes[1].plot(range(total_epochs), bnn.fit_history.history["acc"], '-o', label="training")
-	if 'val_acc' in bnn.fit_history.history:
-		axes[1].plot(range(total_epochs), bnn.fit_history.history["val_acc"], '-o', label="validation")
-	axes[1].legend()
-	axes[1].set_ylabel("accuracy")
-	axes[1].set_xlabel("epoch")
-
+	for i in range(len(bnn.metrics_names)-1):
+		this_metric = bnn.metrics_names[i+1]
+		axes[i+1].plot(range(total_epochs), bnn.fit_history.history[this_metric], '-o', label="training")
+		if "val_{}".format(this_metric) in bnn.fit_history.history:
+			axes[i+1].plot(range(total_epochs), bnn.fit_history.history["val_{}".format(this_metric)], '-o', label="validation")
+		axes[i+1].legend()
+		axes[i+1].set_ylabel(this_metric)
+		axes[i+1].set_xlabel("epoch")
+	
+	plt.tight_layout()
+	
 	return fig, axes
-
-plt.tight_layout()
 
 def make_1d2d(arr):
 	assert arr.ndim == 1

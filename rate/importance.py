@@ -6,6 +6,8 @@ import time
 import rfpimp as rfp
 from tqdm import tqdm
 
+from scipy.linalg import solve_triangular
+
 from .models import BnnBase, BnnBinaryClassifier
 from .projections import CovarianceProjection
 from .logutils import TqdmLoggingHandler
@@ -105,8 +107,12 @@ def RATE2(*args, **kwargs):
 	logger.warning("RATE2 is deprecated - please use rate")
 	return RATE(*args, **kwargs)
 
+def qr_solve(A, b):
+    Q, R = np.linalg.qr(A)
+    return np.matmul(solve_triangular(R, Q.T), b)
+
 def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
-	exact_KLD=False, method="KLD", jitter=1e-9, return_time=False, return_KLDs=False,
+	exact_KLD=False, method="KLD", solver="qr", jitter=1e-9, return_time=False, return_KLDs=False,
 	n_jobs=1, parallel_backend=""):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
@@ -118,6 +124,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		nullify: array-like containing indices of variables for which RATE will not be calculated. Default `None`, in which case RATE values are calculated for every variable.
 		exact_KLD: whether to include the log determinant, trace and 1-p terms in the KLD calculation. Default is False.
 		method: Used in development. Use "KLD" (default) for the RATE calculation.
+		solver: If 'qr', solve the linear system using QR (default). Choose 'lstsq' for a least-squares solution
 		jitter: added to the diagonal of the effect size analogue posterior to ensure positive semi-definitiveness. The code will warn you if any of the resulting KLD values
 				are negative, in which case you should try a larger jitter. This is due to the covariance matrices of the logit posterior not being positive semi-definite.
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
@@ -131,7 +138,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 	"""
 
 	logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
-	logger.debug("Using {} method".format(method))
+	logger.debug("Using {} method and {} solver".format(method, solver))
 
 	#
 	# Shape checks. 1D M_F and 2D V_F will have extra dimension added at the front (for the output class)
@@ -167,6 +174,14 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 
 	KLDs = [np.zeros(J.shape[0]) for _ in range(C)]
 
+	if solver == "qr":
+		alpha_solve_fn = qr_solve
+	elif solver == "lstsq":
+		alpha_solve_fn = lambda A, b: np.linalg.lstsq(A, b, rcond=None)[0]
+	else:
+		logger.warning("Unrecognised solver {}, using qr".format(solver))
+		alpha_solve_fn = qr_solve
+
 	start_time = time.time()
 	for c in range(C):
 		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
@@ -180,10 +195,9 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 
 				alpha = np.matmul(
 					Lambda_red.T, 
-					np.linalg.lstsq(
+					alpha_solve_fn(
 						np.delete(np.delete(Lambda, j, axis=0), j, axis=1),
-						Lambda_red,
-						rcond=None)[0])
+						Lambda_red))
 
 				# Approximation to the full KLD (equation S6 in AoAs supplemental)
 				if nullify is None:

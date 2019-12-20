@@ -6,7 +6,7 @@ Takes about 15 minutes.
 import numpy as np
 
 from rate.projections import PseudoinverseProjection, CovarianceProjection
-from rate.importance import RATE2
+from rate.importance import rate
 from rate.wrapped_r import init_rate_r
 
 import matplotlib.pyplot as plt
@@ -53,7 +53,7 @@ assert np.linalg.matrix_rank(V_F)==n
 ### PSEUDOINVERSE PROJECTION - NO MATRIX FACTORISATION - FIGURE 1 ###
 #####################################################################
 
-rate_python, klds_python = RATE2(X, M_F, V_F, projection=PseudoinverseProjection(), return_KLDs=True) # the python result. Doesn't use matrix factorisation
+rate_python, klds_python = rate(X, M_F, V_F, projection=PseudoinverseProjection(), return_KLDs=True) # the python result. Doesn't use matrix factorisation
 
 print("Pseudoinverse projection, no matrix factorisation...", end="")
 
@@ -103,7 +103,7 @@ print("done")
 
 print("Covariance projection...", end="")
 
-rate_python, klds_python = RATE2(X, M_F, V_F, projection=CovarianceProjection(), return_KLDs=True) # the python result
+rate_python, klds_python = rate(X, M_F, V_F, projection=CovarianceProjection(), return_KLDs=True) # the python result
 
 norms = np.zeros((len(n_draw_vals), n_repeats))
 spearmans_rho = np.zeros((len(n_draw_vals), n_repeats))

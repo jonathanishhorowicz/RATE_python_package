@@ -210,35 +210,37 @@ def test_rate_results():
 
 	norms = np.zeros((len(n_draw_vals), n_repeats))
 
-	#
-	# Pseudoinverse projection
-	#
-	rate_python = rate(X, M_F, V_F, projection=PseudoinverseProjection()) # the python result. Doesn't use matrix factorisation
+	for solver in ["qr", "lstsq"]:
 
-	for i, n_draws in enumerate(n_draw_vals):
-		for j in range(n_repeats):
+		#
+		# Pseudoinverse projection
+		#
+		rate_python = rate(X, M_F, V_F, projection=PseudoinverseProjection(), solver=solver) # the python result. Doesn't use matrix factorisation
 
-			f_draws = np.random.multivariate_normal(M_F[0], V_F[0], size=(n_draws)) # Draw samples
-			rate_r, klds_r, _, _ = rate_r_func(X, f_draws, "linear", False) # Calculate rate using samples (uses R code)
-			norms[i,j] = np.linalg.norm(rate_r-rate_python, ord=2) # Calculate evaluation metrics (norm, correlation)
+		for i, n_draws in enumerate(n_draw_vals):
+			for j in range(n_repeats):
 
-	norm_mean = norms.mean(axis=1)
-	assert np.all(norm_mean[:-1] > norm_mean[1:]) # Mean difference over repeated sets of samples should decrease
+				f_draws = np.random.multivariate_normal(M_F[0], V_F[0], size=(n_draws)) # Draw samples
+				rate_r, klds_r, _, _ = rate_r_func(X, f_draws, "linear", False) # Calculate rate using samples (uses R code)
+				norms[i,j] = np.linalg.norm(rate_r-rate_python, ord=2) # Calculate evaluation metrics (norm, correlation)
 
-	#
-	# Covariance projection
-	#
-	rate_python = rate(X, M_F, V_F, projection=CovarianceProjection()) # the python result. Doesn't use matrix factorisation
+		norm_mean = norms.mean(axis=1)
+		assert np.all(norm_mean[:-1] > norm_mean[1:]) # Mean difference over repeated sets of samples should decrease
 
-	for i, n_draws in enumerate(n_draw_vals):
-		for j in range(n_repeats):
+		#
+		# Covariance projection
+		#
+		rate_python = rate(X, M_F, V_F, projection=CovarianceProjection(), solver=solver) # the python result. Doesn't use matrix factorisation
 
-			f_draws = np.random.multivariate_normal(M_F[0], V_F[0], size=(n_draws)) # Draw samples
-			rate_r, klds_r, _, _ = rate_r_func(X, f_draws, "covariance", False) # Calculate rate using samples (uses R code)
-			norms[i,j] = np.linalg.norm(rate_r-rate_python, ord=2) # Calculate evaluation metrics (norm, correlation)
+		for i, n_draws in enumerate(n_draw_vals):
+			for j in range(n_repeats):
 
-	norm_mean = norms.mean(axis=1)
-	assert np.all(norm_mean[:-1] > norm_mean[1:]) # Mean difference over repeated sets of samples should decrease
+				f_draws = np.random.multivariate_normal(M_F[0], V_F[0], size=(n_draws)) # Draw samples
+				rate_r, klds_r, _, _ = rate_r_func(X, f_draws, "covariance", False) # Calculate rate using samples (uses R code)
+				norms[i,j] = np.linalg.norm(rate_r-rate_python, ord=2) # Calculate evaluation metrics (norm, correlation)
+
+		norm_mean = norms.mean(axis=1)
+		assert np.all(norm_mean[:-1] > norm_mean[1:]) # Mean difference over repeated sets of samples should decrease
 
 
 
