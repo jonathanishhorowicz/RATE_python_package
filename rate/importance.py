@@ -113,7 +113,7 @@ def qr_solve(A, b):
 
 def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
 	exact_KLD=False, method="KLD", solver="qr", jitter=1e-9, return_time=False, return_KLDs=False,
-	n_jobs=1, parallel_backend=""):
+	n_jobs=1, parallel_backend="", progressbar=False):
 	"""Calculate RATE values. This function will replace previous versions in v1.0
 
 	Args:
@@ -130,6 +130,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 		return KLDs: whether to return the KLD values as well as the RATE values. For debugging. Default is False.
 		parallel_backend: the parallel backend (only relevant if n_jobs > 1). One of 'ray' or 'multiprocessing'
+		progressbar: whether to display the tqpdm progress bar (default False).
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
@@ -186,7 +187,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 	for c in range(C):
 		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
 		Lambda = np.linalg.pinv(V_B[c] + jitter*np.eye(V_B.shape[1]))
-		for j in tqdm(J):
+		for j in tqdm(J, disable=not progressbar):
 			if method=="KLD":
 				if nullify is not None:
 					j = np.array(np.unique(np.concatenate(([j], nullify)), axis=0))
