@@ -14,7 +14,7 @@ from .logutils import TqdmLoggingHandler
 
 import logging
 logger = logging.getLogger(__name__)
-logger.addHandler(TqdmLoggingHandler())
+#logger.addHandler(TqdmLoggingHandler())
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
@@ -144,9 +144,9 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 	#
 	# Shape checks. 1D M_F and 2D V_F will have extra dimension added at the front (for the output class)
 	#
-	if M_F.ndim==1 :
+	if M_F.ndim==1:
 		M_F = M_F[np.newaxis]
-		logger.debug("Reshaping 1D M_F to {}".format(M_F.shape))
+		logger.debug("Reshaping M_F to {}".format(M_F.shape))
 
 	if V_F.ndim==2:
 		V_F = V_F[np.newaxis]
@@ -157,7 +157,10 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 	if M_F.shape[0] != V_F.shape[0]:
 		raise ValueError("Inconsistent number of classes between logit posterior mean and covariance")
 
-	logger.info("Calculating RATE values for {} classes, {} examples and {} variables".format(M_F.shape[0], X.shape[0], X.shape[1]))
+	logger.info("Calculating RATE values for {} classes, {} examples and {} variables".format(
+		M_F.shape[0], X.shape[0], X.shape[1]))
+	if exact_KLD:
+		logger.info("Using exact KLD calcuation")
 
 	# PARALLELISATION NOT FULLY TESTED YET - CALL RATE_ray directly
 	# if n_jobs > 1:

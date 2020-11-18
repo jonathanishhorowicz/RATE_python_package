@@ -50,7 +50,7 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	"""
 
 	@abstractmethod
-	def __init__(self, layers, optimiser_fn, metrics, n_mc_samples, verbose):
+	def __init__(self, layer_fn, optimiser_fn, metrics, n_mc_samples, verbose):
 		"""
 
 		Args:
@@ -63,33 +63,45 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 			verbose: how much to print (0: nothing, 1: progress bar when predicting/fitting). This is the default
 					value but can be overridden in individual function calls.
 		"""
-		self.layers = layers
+		self.layer_fn = layer_fn
 		self.optimiser_fn = optimiser_fn
 		self.metrics = metrics
 		self.n_mc_samples = n_mc_samples
 		self.verbose = verbose
 		self.target_type = TARGET_TYPES[self.__class__.__name__]
 
-		logger.debug("Constructed instance of {} with {} layers".format(
-			self.__class__.__name__,
-			len(layers)))
+		logger.debug("Constructed instance of {}".format(
+			self.__class__.__name__))
 
 	def _build_model(self, X, y):
 		"""Compile the keras model for the logits
 		"""
-		logging.debug("Fitting {} model with X shape {} and y shape {}".format(X.shape, y.shape, self.__class__.__name__))
+		logging.debug("Fitting {} model with X shape {} and y shape {}".format(self.__class__.__name__, X.shape, y.shape))
 
-		if len(self.layers) == 0:
-			logging.debug("No layers defined - using default architecture for {}".format(self.__class__.__name__))
-			self.layers = self._get_layers(X, y)
-		self._logit_model = tf.keras.Sequential()
-		for l in self.layers[:-1]:
-			logger.debug("Adding layer {} to {}".format(l, self.__class__.__name__))
-			self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - doesn't work with DenseLocalReparameterization layer for some reason
-		logger.debug("Adding DenseLocalReparameterization layer with {} units".format(self.layers[-1].units))
-		self._logit_model.add(tfp.layers.DenseLocalReparameterization(self.layers[-1].units)) # Hack for now - will always use mean-field approximation
+		# if len(self.layers) == 0:
+		# 	logging.debug("No layers defined - using default architecture for {}".format(self.__class__.__name__))
+		# 	self.layers = self._get_layers(X, y)
+		# self._logit_model = tf.keras.Sequential()
+		# for l in self.layers[:-1]:
+		# 	logger.debug("Adding layer {} to {}".format(l, self.__class__.__name__))
+		# 	self._logit_model.add(l.__class__.from_config(l.get_config())) # Deep copy of layers - doesn't work with DenseLocalReparameterization layer for some reason
+		# logger.debug("Adding {} layer with {} units".format(self.layers[-1].__class__.__name__, self.layers[-1].units))
+		# self._logit_model.add(self.layers[-1].__class__(
+		# 	self.layers[-1].units,
+		# 	kernel_posterior_fn=self.layers[-1].kernel_posterior_fn,
+		# 	kernel_prior_fn=self.layers[-1].kernel_prior_fn,
+		# 	bias_posterior_fn=self.layers[-1].bias_posterior_fn,
+		# 	bias_prior_fn=self.layers[-1].bias_prior_fn
+		# 	)
+		# )
+
+		if self.layer_fn is None:
+			raise ValueError("must pass a layer_fn")
+		self._logit_model = tf.keras.Sequential(self.layer_fn())
 		self.p = self._logit_model.layers[0].input_shape[1]
 		self.C = self._logit_model.layers[-1].units
+		self.n_post_weights = self._logit_model._layers[-1].input_shape[1]
+		self.n_post_bias = self._logit_model._layers[-1].units
 		logger.debug("Compiling logit model for {}...".format(self.__class__.__name__))
 		self._logit_model.compile(loss=self._elbo(), optimizer=self.optimiser_fn(), metrics=self.metrics)
 		self._hmodel = tf.keras.Model(self._logit_model.input , self._logit_model.layers[-2].output)
@@ -157,61 +169,96 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		else:
 			return loss_samples
 
-	# Could make this protected
-	def H(self, X, **kwargs):
-		"""The (deterministic) activation of the penultimate layer for a set of examples X.
+	# # Could make this protected
+	# def H(self, X, **kwargs):
+	# 	"""The (deterministic) activation of the penultimate layer for a set of examples X.
 
-		Args:
-			X: input with shape (n_examples, n_input_dimensions)
-			**kwargs: passed to the Keras fit method. See Keras docs for more details.
+	# 	Args:
+	# 		X: input with shape (n_examples, n_input_dimensions)
+	# 		**kwargs: passed to the Keras fit method. See Keras docs for more details.
 
 
-		Returns:
-			H: activations of the penultimate network layer, an array with shape (n_examples, penultimate_layer_size)
-		"""
-		logger.debug("Calculating H for X with shape {}".format(X.shape))
-		check_is_fitted(self, "_logit_model")
-		verbosity, kwargs = self._check_verbosity(kwargs)
-		return self._hmodel.predict(X, verbose=verbosity, **kwargs)
+	# 	Returns:
+	# 		H: activations of the penultimate network layer, an array with shape (n_examples, penultimate_layer_size)
+	# 	"""
+	# 	logger.debug("Calculating H for X with shape {}".format(X.shape))
+	# 	check_is_fitted(self, "_logit_model")
+	# 	verbosity, kwargs = self._check_verbosity(kwargs)
+	# 	return self._hmodel.predict(X, verbose=verbosity, **kwargs)
 
-	def var_params(self):
-		"""The variational parameters of the final layer weights (the bias is deterministic but is
-		is included with the weight posteriors as they are needed together to calculate RATE).
-
-		TODO: what happens to these shapes when variational posterior is not fully factorised?
+	def var_params(self, numpy=True):
+		"""The parameters of the variational posterior over the final layer weights and biases
 
 		Returns:
-			M_W: the means of the variational posterior, shape (penultimate layer size, final layer size)
-			V_W: the variances of the variational posterior, shape (penultimate layer size, final layer size)
-			b: deterministic bias of the final layer, shape (final layer size,)
+			Tensors of the posterior mean and covaraince
 		"""
 		check_is_fitted(self, "_logit_model")
-		W1_loc, W1_scale, b = [K.eval(self._logit_model.layers[-1].kernel_posterior.distribution.loc),
-							   K.eval(self._logit_model.layers[-1].kernel_posterior.distribution.scale),
-							   K.eval(self._logit_model.layers[-1].bias_posterior.distribution.loc)]
-		return W1_loc, np.square(W1_scale), b
+		# W1_loc, W1_scale, b = [K.eval(self._logit_model.layers[-1].kernel_posterior.distribution.loc),
+		# 					   K.eval(self._logit_model.layers[-1].kernel_posterior.distribution.scale),
+		# 					   K.eval(self._logit_model.layers[-1].bias_posterior.distribution.loc)]
+
+		post_mean = self._logit_model._layers[-1]._posterior(tf.zeros(1)).mean()
+		try:
+			post_cov = self._logit_model._layers[-1]._posterior(tf.zeros(1)).covariance()
+		except NotImplementedError:
+			post_cov = self._logit_model._layers[-1]._posterior(tf.zeros(1)).variance()
+			post_cov = tf.linalg.diag(post_cov)
+
+		if numpy:
+			post_mean = K.eval(post_mean)
+			post_cov = K.eval(post_cov)
+
+		return post_mean, post_cov 
 
 	# Should have the class index as the first index, so that we can use numpy broadcasting for the batch multiplication
-	def logit_posterior(self, X):
+	def logit_posterior(self, X, numpy=True):
 		"""The means and covariance of the posterior over the logits. Calculated using the variational
 		posterior over the final layer weights.
 
 		Args:
 			X: examples (array with shape (n_examples, n_variables))
+			numpy: whether to return numpy arrays (default) or tensors
 
 		TODO: shapes may break for C > 1
 
 		Returns:
-			logit_posterior, a 2-tuple containing:
-				1. an array containing the logit posterior mean, shape (n_classes, n_examples)
-				2. an array containing the logit posterior covariance, shape (n_classes, n_examples, n_examples)
+			logit posterior mean and covariance evaluated at X
 		"""
 		logger.debug("Calculating the logit posterior for X with shape {}".format(X.shape))
-		H_X = self.H(X)
-		M_W, V_W, b = self.var_params()
-		M_F = np.matmul(H_X, M_W) + b[np.newaxis,:]
-		V_F = np.array([np.matmul(H_X*V_W[:,c], H_X.T) for c in range(self.C)])
-		return M_F.T, V_F
+		
+		# inner-layer activations
+		H_X = self._hmodel(X)
+		logger.debug("H_X.shape: {}".format(H_X.shape))
+
+		# logit posterior mean and covariance
+		post_mean, post_cov = self.var_params(numpy=False)
+		post_mean = tf.expand_dims(post_mean, axis=1)
+		logger.debug("post_mean.shape: {}, post_cov.shape: {}".format(post_mean.shape, post_cov.shape))
+
+		# separate into weights and bias
+		M_w = post_mean[:self.n_post_weights]
+		M_b = post_mean[-self.n_post_bias:]
+		logger.debug("M_w.shape: {}, M_b.shape: {}".format(M_w.shape, M_b.shape))
+
+		V_w = post_cov[:self.n_post_weights,:self.n_post_weights]
+		V_b = post_cov[-self.n_post_bias:,-self.n_post_bias:]
+		V_bw = post_cov[:self.n_post_weights,-self.n_post_bias:]
+		logger.debug("V_w.shape: {}, V_b.shape: {}, V_bw.shape: {}".format(
+			V_w.shape, V_b.shape, V_bw.shape))
+
+		# posterior over logits
+		M_f = tf.squeeze(tf.matmul(H_X, M_w) + M_b)
+		V_f = tf.matmul(H_X, tf.matmul(V_w, tf.transpose(H_X))) + 2.0 * tf.matmul(H_X, V_bw)
+		logger.debug("M_f.shape: {}, V_f.shape: {}".format(M_f.shape, V_f.shape))
+
+		if numpy:
+			M_f = K.eval(M_f)
+			V_f = K.eval(V_f)
+
+		# M_W, V_W, b = self.var_params()
+		# M_F = np.matmul(H_X, M_W) + b[np.newaxis,:]
+		# V_F = np.array([np.matmul(H_X*V_W[:,c], H_X.T) for c in range(self.C)])
+		return M_f, V_f
 
 	@abstractmethod
 	def _nll(self, labels, logits):
@@ -222,7 +269,7 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 	def _elbo(self):
 		"""The evidence lower bound - sum of negative log likelihood and KL-divergence term
 		"""
-		return lambda y_true, logits: self._nll(y_true, logits) + sum(self._logit_model.losses)/K.cast(K.shape(y_true)[0], "float32")
+		return lambda y_true, logits: self._nll(y_true, logits) + sum(self._logit_model.losses)
 
 	@abstractmethod
 	def predict_samples(self, X, n_mc_samples=None, **kwargs):
@@ -245,19 +292,22 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		else:
 			return self.verbose, kwargs
 
+	def summary(self):
+		self._logit_model.summary()
+
 
 class BnnBinaryClassifier(BnnBase, ClassifierMixin):
 	"""Bayesian neural network for binary classification
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=0):
+	def __init__(self, layer_fn=None, optimiser_fn=Adam, metrics=["acc"], n_mc_samples=100, verbose=0):
 		"""Constructs a Bnn Binary Classifier. See BnnBase __init__ for the meanings of the arguments.
 		
 		This function contains some sensible defaults, including for the network architecture (the layers
 		argument) but it is better to specify your own architecture.
 		"""
 		super().__init__(
-			layers=layers,
+			layer_fn=layer_fn,
 			optimiser_fn=optimiser_fn,
 			metrics=metrics,
 			n_mc_samples=n_mc_samples,
@@ -383,9 +433,9 @@ class BnnScalarRegressor(BnnBase, RegressorMixin):
 	"""Bayesian neural network for scalar regression
 	"""
 
-	def __init__(self, layers=[], optimiser_fn=Adam, metrics=["mse"], n_mc_samples=100, verbose=0):
+	def __init__(self, layer_fn=[], optimiser_fn=Adam, metrics=["mse"], n_mc_samples=100, verbose=0):
 		super().__init__(
-			layers=layers,
+			layer_fn=layer_fn,
 			optimiser_fn=optimiser_fn,
 			metrics=metrics,
 			n_mc_samples=n_mc_samples,
