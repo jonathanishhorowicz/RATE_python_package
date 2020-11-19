@@ -13,7 +13,8 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.metrics import mean_squared_error as mean_squared_error_score
 
 from tensorflow.compat.v1.losses import mean_squared_error
-from tensorflow.nn import sigmoid_cross_entropy_with_logits, softmax_cross_entropy_with_logits_v2
+from tensorflow.nn import sigmoid_cross_entropy_with_logits
+from tensorflow.compat.v1.nn import softmax_cross_entropy_with_logits_v2
 from tensorflow.keras.optimizers import Adam
 
 from .utils import make_1d2d

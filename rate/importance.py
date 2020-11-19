@@ -1,9 +1,9 @@
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import Process, Manager
-import ray
+#import ray
 import time
-import rfpimp as rfp
+#import rfpimp as rfp
 from tqdm import tqdm
 
 from scipy.linalg import solve_triangular
@@ -18,94 +18,94 @@ logger = logging.getLogger(__name__)
 
 # TODO: make n_jobs/n_workers consistent across all of the code
 
-@ray.remote
-def KLD_ray(M_B_c, Lambda, j, nullify, exact):
-	p = Lambda.shape[0]
-	if nullify is not None:
-		j = np.array(np.unique(np.concatenate(([j], nullify)), axis=0))
-	m = M_B_c[j]
-	Lambda_red = np.delete(Lambda, j, axis=0)[:,j]
+# @ray.remote
+# def KLD_ray(M_B_c, Lambda, j, nullify, exact):
+# 	p = Lambda.shape[0]
+# 	if nullify is not None:
+# 		j = np.array(np.unique(np.concatenate(([j], nullify)), axis=0))
+# 	m = M_B_c[j]
+# 	Lambda_red = np.delete(Lambda, j, axis=0)[:,j]
 
-	alpha = np.matmul(
-		Lambda_red.T, 
-		np.linalg.lstsq(
-			np.delete(np.delete(Lambda, j, axis=0), j, axis=1),
-			Lambda_red,
-			rcond=None)[0])
+# 	alpha = np.matmul(
+# 		Lambda_red.T, 
+# 		np.linalg.lstsq(
+# 			np.delete(np.delete(Lambda, j, axis=0), j, axis=1),
+# 			Lambda_red,
+# 			rcond=None)[0])
 
-	# Approximation to the full KLD (equation S6 in AoAs supplemental)
-	if nullify is None:
-		kld = 0.5 * m**2.0 * alpha
-	else:
-		kld = 0.5 * np.matmul(np.matmul(m.T, alpha), m)
+# 	# Approximation to the full KLD (equation S6 in AoAs supplemental)
+# 	if nullify is None:
+# 		kld = 0.5 * m**2.0 * alpha
+# 	else:
+# 		kld = 0.5 * np.matmul(np.matmul(m.T, alpha), m)
 
-	# Additional terms in the full KLD calculation (equation 9 in AoAS paper)
-	if exact:
-		sigma_lambda_product = np.matmul(
-						np.delete(np.delete(V_B[c], j, axis=0), j, axis=1),
-						np.delete(np.delete(Lambda, j, axis=0), j, axis=1))
+# 	# Additional terms in the full KLD calculation (equation 9 in AoAS paper)
+# 	if exact:
+# 		sigma_lambda_product = np.matmul(
+# 						np.delete(np.delete(V_B[c], j, axis=0), j, axis=1),
+# 						np.delete(np.delete(Lambda, j, axis=0), j, axis=1))
 
-		kld += 0.5 * (
-			- np.log(np.linalg.det(sigma_lambda_product) + 1e-9)
-			+ np.trace(sigma_lambda_product)
-			+ 1.0 - p)
+# 		kld += 0.5 * (
+# 			- np.log(np.linalg.det(sigma_lambda_product) + 1e-9)
+# 			+ np.trace(sigma_lambda_product)
+# 			+ 1.0 - p)
 
-	return kld
+# 	return kld
 
-def RATE_ray(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
-	exact_KLD=False, jitter=1e-9, return_time=False, return_KLDs=False,
-	n_jobs=1):
+# def RATE_ray(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
+# 	exact_KLD=False, jitter=1e-9, return_time=False, return_KLDs=False,
+# 	n_jobs=1):
 
-	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
-		raise ValueError("Inconsistent number of examples across X and logit posterior")
-	if M_F.shape[0] != V_F.shape[0]:
-		raise ValueError("Inconsistent number of classes between logit posterior mean and covariance")
+# 	if not (X.shape[0] == M_F.shape[1] == V_F.shape[1] == V_F.shape[2]):
+# 		raise ValueError("Inconsistent number of examples across X and logit posterior")
+# 	if M_F.shape[0] != V_F.shape[0]:
+# 		raise ValueError("Inconsistent number of classes between logit posterior mean and covariance")
 
-	# logger.info("Calculating RATE (using ray) values for {} classes, {} examples and {} variables and {} jobs".format(M_F.shape[0], X.shape[0], X.shape[1], n_jobs))
-	# logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
+# 	# logger.info("Calculating RATE (using ray) values for {} classes, {} examples and {} variables and {} jobs".format(M_F.shape[0], X.shape[0], X.shape[1], n_jobs))
+# 	# logger.debug("Input shapes: X: {}, M_F: {}, V_F: {}".format(X.shape, M_F.shape, V_F.shape))
 
-	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
+# 	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
 
-	C = M_F.shape[0]
-	p = X.shape[1]
-	J = np.arange(p)
-	if nullify is not None:
-		J = np.delete(J, nullify, axis=0)
+# 	C = M_F.shape[0]
+# 	p = X.shape[1]
+# 	J = np.arange(p)
+# 	if nullify is not None:
+# 		J = np.delete(J, nullify, axis=0)
 
-	KLDs = [np.zeros(J.shape[0]) for _ in range(C)]
-	ray.init(num_cpus=n_jobs)
+# 	KLDs = [np.zeros(J.shape[0]) for _ in range(C)]
+# 	ray.init(num_cpus=n_jobs)
 
-	start_time = time.time()
-	for c in range(C):
-		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
-		Lambda = np.linalg.pinv(V_B[c] + jitter*np.eye(V_B.shape[1]))
-		Lambda_id = ray.put(Lambda)
-		KLDs[c] = ray.get([KLD_ray.remote(M_B[c], Lambda_id, j, nullify, exact_KLD) for j in J])
-	ray.shutdown()
+# 	start_time = time.time()
+# 	for c in range(C):
+# 		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
+# 		Lambda = np.linalg.pinv(V_B[c] + jitter*np.eye(V_B.shape[1]))
+# 		Lambda_id = ray.put(Lambda)
+# 		KLDs[c] = ray.get([KLD_ray.remote(M_B[c], Lambda_id, j, nullify, exact_KLD) for j in J])
+# 	ray.shutdown()
 
-	if (np.array(KLDs) < 0.0).any():
-		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
+# 	if (np.array(KLDs) < 0.0).any():
+# 		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
                                                  
-	out = [klds / np.sum(klds) for klds in KLDs]
-	rate_time = time.time() - start_time
+# 	out = [klds / np.sum(klds) for klds in KLDs]
+# 	rate_time = time.time() - start_time
 
-	logger.info("The RATE calculation took {} seconds".format(round(rate_time, 3)))
+# 	logger.info("The RATE calculation took {} seconds".format(round(rate_time, 3)))
 
-	if C==1:
-		out = out[0]
+# 	if C==1:
+# 		out = out[0]
 	
-	if return_KLDs:
-		out = [out, KLDs]
-	if return_time:
-		out = [out, rate_time]
-	return out
+# 	if return_KLDs:
+# 		out = [out, KLDs]
+# 	if return_time:
+# 		out = [out, rate_time]
+# 	return out
 
-def RATE2(*args, **kwargs):
-	"""Wrapper for RATE - RATE2 was the development function name.
+# def RATE2(*args, **kwargs):
+# 	"""Wrapper for RATE - RATE2 was the development function name.
 
-	For supporting older notebooks, scripts etc"""
-	logger.warning("RATE2 is deprecated - please use rate")
-	return RATE(*args, **kwargs)
+# 	For supporting older notebooks, scripts etc"""
+# 	logger.warning("RATE2 is deprecated - please use rate")
+# 	return RATE(*args, **kwargs)
 
 def qr_solve(A, b):
     Q, R = np.linalg.qr(A)
@@ -266,34 +266,34 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		out = [out, rate_time]
 	return out
 
-def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
-	"""
-	Calculate permutation importances for a BNN or its mimic. Also returns the time taken
-    so result is a 2-tuple (array of importance values, time)
+# def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
+# 	"""
+# 	Calculate permutation importances for a BNN or its mimic. Also returns the time taken
+#     so result is a 2-tuple (array of importance values, time)
 
-	Args:
-		model: a BnnBinaryClassifier, RandomForestClassifier or GradientBoostingClassifier
-		X, y: examples and labels. The permutation importances are computed by shuffling columns
-			  of X and seeing how the prediction accuracy for y is affected
-		features: How many features to compute importances for. Default (None) is to compute
-				  for every feature. Otherwise use a list of integers
-		n_examples: How many examples to use in the computation. Default (None) uses all the
-					features. Otherwise choose a positive integer that is less than 
-					the number of rows of X/y.
-		n_mc_samples: number of MC samples (BNN only)
+# 	Args:
+# 		model: a BnnBinaryClassifier, RandomForestClassifier or GradientBoostingClassifier
+# 		X, y: examples and labels. The permutation importances are computed by shuffling columns
+# 			  of X and seeing how the prediction accuracy for y is affected
+# 		features: How many features to compute importances for. Default (None) is to compute
+# 				  for every feature. Otherwise use a list of integers
+# 		n_examples: How many examples to use in the computation. Default (None) uses all the
+# 					features. Otherwise choose a positive integer that is less than 
+# 					the number of rows of X/y.
+# 		n_mc_samples: number of MC samples (BNN only)
 
-	Returns a 1D array of permutation importance values in the same order as the columns of X
-	"""
-	X_df, y_df = pd.DataFrame(X), pd.DataFrame(y)
-	X_df.columns = X_df.columns.map(str) # rfpimp doesn't like integer column names
+# 	Returns a 1D array of permutation importance values in the same order as the columns of X
+# 	"""
+# 	X_df, y_df = pd.DataFrame(X), pd.DataFrame(y)
+# 	X_df.columns = X_df.columns.map(str) # rfpimp doesn't like integer column names
 
-	if n_examples is None:
-		n_examples = -1
-	start_time = time.time()
-	if isinstance(model, BnnBinaryClassifier):
-		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df,
-								metric=lambda model, X, y, sw: model.score(X, y, n_mc_samples, sample_weight=sw), n_samples=n_examples, sort=False).values)
-	elif isinstance(model, RandomForestClassifier) or isinstance(model, GradientBoostingClassifier):
-		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df, n_samples=n_examples, sort=False).values)
-	time_taken = time.time() - start_time
-	return imp_vals, time_taken
+# 	if n_examples is None:
+# 		n_examples = -1
+# 	start_time = time.time()
+# 	if isinstance(model, BnnBinaryClassifier):
+# 		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df,
+# 								metric=lambda model, X, y, sw: model.score(X, y, n_mc_samples, sample_weight=sw), n_samples=n_examples, sort=False).values)
+# 	elif isinstance(model, RandomForestClassifier) or isinstance(model, GradientBoostingClassifier):
+# 		imp_vals = np.squeeze(rfp.importances(model, X_df, y_df, n_samples=n_examples, sort=False).values)
+# 	time_taken = time.time() - start_time
+# 	return imp_vals, time_taken

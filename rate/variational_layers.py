@@ -6,14 +6,18 @@ import numpy as np
 # todo: are these good initialisations?
 # todo: scale factor on prior
 
-def prior(kernel_size, bias_size, dtype=None):
-    n = kernel_size + bias_size
-    model = tf.keras.Sequential([
-        tfp.layers.DistributionLambda(
-            lambda t: tfd.MultivariateNormalDiag(loc=tf.zeros(n, dtype), scale_diag=tf.ones(n, dtype))
-        )
-    ])
-    return model
+def prior_standardnormal():
+
+    def _fn(kernel_size, bias_size, dtype=None):
+        n = kernel_size + bias_size 
+        model = tf.keras.Sequential([
+            tfp.layers.DistributionLambda(
+                lambda t: tfd.MultivariateNormalDiag(loc=tf.zeros(n, dtype), scale_diag=tf.ones(n, dtype))
+            )
+        ])
+        return model
+
+    return _fn
 
 def posterior_fullcov(kernel_size, bias_size, dtype=None):
     n = kernel_size + bias_size
@@ -34,12 +38,12 @@ def posterior_mean_field(kernel_size, bias_size, dtype=None):
           reinterpreted_batch_ndims=1)),
     ])
 
-def densevar_layer(C, n, meanfield, beta):
+def densevar_layer(C, n, meanfield, prior_fn, beta, kl_use_exact):
     return tfp.python.layers.DenseVariational(
             C,
             use_bias=True,
-            make_prior_fn=prior,
+            make_prior_fn=prior_fn,
             make_posterior_fn=posterior_mean_field if meanfield else posterior_fullcov,
             kl_weight=beta/n,
-            kl_use_exact=True
+            kl_use_exact=kl_use_exact
         )
