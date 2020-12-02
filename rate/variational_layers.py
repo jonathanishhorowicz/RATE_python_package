@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 import tensorflow_probability.python.distributions as tfd
+import tensorflow_probability.python.layers as tfpl
 import numpy as np
 
 # todo: are these good initialisations?
