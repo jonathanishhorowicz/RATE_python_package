@@ -499,11 +499,11 @@ class BnnMultiClassifier(BnnBase, ClassifierMixin):
 			verbose=verbose)
 
 	def _nll(self, labels, logits):
-		"""Negative log likelihood - the reconstruction term in the ELBO. It is a sigmoid cross entropy
-		for binary classification.
+		"""Negative log likelihood - the reconstruction term in the ELBO. It is softmax cross entropy
+		for multiclass classification.
 
 		Returns:
-			The negative cross entropy tensorflow op
+			The mean cross entropy tensorflow op
 		"""
 		return tf.reduce_mean(softmax_cross_entropy_with_logits(labels=labels, logits=logits))
 

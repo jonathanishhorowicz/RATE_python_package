@@ -8,6 +8,9 @@ import numpy as np
 # todo: scale factor on the standard normal prior
 
 def posterior_fullcov():
+    """Full covariance posterior for weights and biases.
+    Deprecated: use posterior_blockdiag
+    """
     
     def _fn(kernel_size, bias_size, dtype=None):
         n = kernel_size + bias_size
@@ -19,6 +22,32 @@ def posterior_fullcov():
     return _fn
 
 def posterior_mean_field():
+    """Mean field covariance for weights, determinstic biases
+    
+    """
+
+    def _fn(kernel_size, bias_size, dtype=None):
+        smallconst = np.log(np.expm1(1.))
+        n = kernel_size + bias_size
+        c = np.log(np.expm1(1.))
+        model = tf.keras.Sequential([
+          tfp.layers.VariableLayer(2*kernel_size + bias_size, dtype=dtype),
+          tfpl.DistributionLambda(lambda t: tfd.Blockwise(
+                    [
+                        tfd.MultivariateNormalDiag(
+                            loc=t[...,:kernel_size],
+                            scale_diag=1e-5 + tf.nn.softplus(smallconst + t[...,kernel_size:-bias_size])),
+                        tfd.VectorDeterministic(loc=t[...,-bias_size:])
+                    ]
+                )
+            )
+        ])
+        return model
+    return _fn
+
+def posterior_mean_field_old():
+    """Mean field posterior for weights and biases
+    """
 
     def _fn(kernel_size, bias_size, dtype=None):
         n = kernel_size + bias_size
