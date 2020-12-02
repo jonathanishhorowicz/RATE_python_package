@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 import multiprocessing as mp
 from multiprocessing import Process, Manager
 #import ray
