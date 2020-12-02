@@ -99,7 +99,7 @@ def get_roc_curves(variable_importances):
                     ])
     return roc_curve_df
 
-def load_mnist(onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
+def load_mnist(fashion, onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 	"""
 	Load the MNIST dataset
 
@@ -120,9 +120,13 @@ def load_mnist(onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 											First dimension is always the number of examples
 
 	"""
-	(x_train, y_train),(x_test, y_test) = tf.keras.datasets.mnist.load_data()
-	x_train, x_test = x_train / 255.0, x_test / 255.0
-
+	if not fashion:
+		(x_train, y_train),(x_test, y_test) = tf.keras.datasets.mnist.load_data()
+		x_train, x_test = x_train / 255.0, x_test / 255.0
+	else:
+		(x_train, y_train),(x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
+		x_train, x_test = x_train / 255.0, x_test / 255.0  
+        
 	def crop(X, crop_size):
 		assert crop_x < X.shape[1]/2
 		assert crop_x < X.shape[2]/2
