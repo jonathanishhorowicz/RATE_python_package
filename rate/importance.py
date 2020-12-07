@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 #logger.addHandler(TqdmLoggingHandler())
 
 def qr_solve(A, b):
-    Q, R = np.linalg.qr(A)
-    return np.matmul(solve_triangular(R, Q.T), b)
+	Q, R = np.linalg.qr(A)
+	return np.matmul(solve_triangular(R, Q.T), b)
 
 def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None, 
 	exact_KLD=False, method="KLD", solver="qr", jitter=1e-9, return_time=False, return_KLDs=False,
@@ -40,7 +40,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		return_time: whether or not to return the time taken to compute the RATE values. Default if False.
 		return KLDs: whether to return the KLD values as well as the RATE values. For debugging. Default is False.
 		parallel_backend: the parallel backend (only relevant if n_jobs > 1). One of 'ray' or 'multiprocessing'
-		progressbar: whether to display the tqpdm progress bar (default False).
+		progressbar: whether to display the tqdm progress bar (default False).
 	
 	Returns:
 		rate_vals: a list of length n_classes, where each item is an array of per-variable RATE values for a given class. A single array is returned for n_classes = 1.
@@ -160,7 +160,7 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 
 	if (np.array(KLDs) < 0.0).any():
 		logger.warning("Some KLD values are negative - try a larger jitter value (current value: {})".format(jitter))
-                                                 
+												 
 	out = [klds / np.sum(klds) for klds in KLDs]
 	rate_time = time.time() - start_time
 
@@ -176,55 +176,54 @@ def rate(X, M_F, V_F, projection=CovarianceProjection(), nullify=None,
 		out = [out, rate_time]
 	return out
 
-
 def jth_partition(mu, Sigma, j):
-    mu_j = np.array(mu[j]).reshape(1,1)
-    mu_min_j = np.delete(mu, j, axis=0)[:,np.newaxis]
-    sigma_j = np.array(Sigma[j,j]).reshape(1,1)
-    sigma_min_j = np.delete(Sigma, j, axis=0)[:,j][:,np.newaxis]
-    Sigma_min_j = np.delete(np.delete(Sigma, j, axis=0), j, axis=1)
-    
+	mu_j = np.array(mu[j]).reshape(1,1)
+	mu_min_j = np.delete(mu, j, axis=0)[:,np.newaxis]
+	sigma_j = np.array(Sigma[j,j]).reshape(1,1)
+	sigma_min_j = np.delete(Sigma, j, axis=0)[:,j][:,np.newaxis]
+	Sigma_min_j = np.delete(np.delete(Sigma, j, axis=0), j, axis=1)
+	
 #     print("Sizes:\n\tmu_j: {}, mu_min_j: {}\n\tsigma_j: {}, sigma_min_j:{}, Sigma_min_j:{}".format(
 #         mu_j.shape, mu_min_j.shape, sigma_j.shape, sigma_min_j.shape, Sigma_min_j.shape
 #     ))
-    
-    return mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j
+	
+	return mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j
 
 def condition_gaussian(mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j):
-    mu_cond = mu_min_j - np.dot(sigma_min_j, mu_j)/sigma_j
-    #print("\n\tmu_cond: {}".format(mu_cond.shape))
-    Sigma_cond = Sigma_min_j - np.dot(sigma_min_j, np.dot(mu_j, sigma_min_j.T))/sigma_j
-    #print("\tSigma_cond: {}".format(Sigma_cond.shape))
-    
-    return mu_cond, Sigma_cond
+	mu_cond = mu_min_j - np.dot(sigma_min_j, mu_j)/sigma_j
+	#print("\n\tmu_cond: {}".format(mu_cond.shape))
+	Sigma_cond = Sigma_min_j - np.dot(sigma_min_j, sigma_min_j.T)/sigma_j
+	#print("\tSigma_cond: {}".format(Sigma_cond.shape))
+	
+	return mu_cond, Sigma_cond
 
 def Wasserstein_gaussian(mu_0, Sigma_0, mu_1, Sigma_1):
-    """https://github.com/VersElectronics/WGPOT/blob/master/wgpot.py"""
+	"""https://github.com/VersElectronics/WGPOT/blob/master/wgpot.py"""
 
-    sqrtK_0 = sqrtm(Sigma_0)
-    first_term = np.dot(sqrtK_0, Sigma_1)
-    K_0_K_1_K_0 = np.dot(first_term, sqrtK_0)
+	sqrtK_0 = sqrtm(Sigma_0)
+	first_term = np.dot(sqrtK_0, Sigma_1)
+	K_0_K_1_K_0 = np.dot(first_term, sqrtK_0)
 
-    cov_dist = np.trace(Sigma_0) + np.trace(Sigma_1) - 2.0 * np.trace(sqrtm(K_0_K_1_K_0))
-    l2norm = np.sum(np.square(np.abs(mu_0 - mu_1)))
-    d = np.real(np.sqrt(l2norm + cov_dist))
+	cov_dist = np.trace(Sigma_0) + np.trace(Sigma_1) - 2.0 * np.trace(sqrtm(K_0_K_1_K_0))
+	l2norm = np.sum(np.square(np.abs(mu_0 - mu_1)))
+	d = np.real(np.sqrt(l2norm + cov_dist))
 
-    return d
+	return d
 
 def rate_wasserstein(X, M_F, V_F, projection=CovarianceProjection()):
-    M_B, V_B = projection.esa_posterior(X, M_F, V_F)
-    C = M_F.shape[0]
-    
-    wass_unnorm = [np.zeros(X.shape[1]) for _ in range(M_F.shape[0])]
-    
-    for c in range(C):
-        logger.info("Calculating Wasserstein RATE values for class {} of {}".format(c+1, C))
-        for j in range(X.shape[1]):
-            mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(M_B[c], V_B[c], j)
-            mu_cond, Sigma_cond = condition_gaussian(mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j)
-            wass_unnorm[c][j] = Wasserstein_gaussian(mu_cond, Sigma_cond, mu_min_j, Sigma_min_j)
-    
-    return [wass/wass.sum() for wass in wass_unnorm]
+	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
+	C = M_F.shape[0]
+	
+	wass_unnorm = [np.zeros(X.shape[1]) for _ in range(M_F.shape[0])]
+	
+	for c in range(C):
+		logger.info("Calculating Wasserstein RATE values for class {} of {}".format(c+1, C))
+		for j in range(X.shape[1]):
+			mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(M_B[c], V_B[c], j)
+			mu_cond, Sigma_cond = condition_gaussian(mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j)
+			wass_unnorm[c][j] = Wasserstein_gaussian(mu_cond, Sigma_cond, mu_min_j, Sigma_min_j)
+	
+	return [wass/wass.sum() for wass in wass_unnorm]
 
 # def perm_importances(model, X, y, features=None, n_examples=None, n_mc_samples=100):
 # 	"""
@@ -259,124 +258,124 @@ def rate_wasserstein(X, M_F, V_F, projection=CovarianceProjection()):
 # 	return imp_vals, time_taken
 
 def vanilla_gradients(model, X, numpy=True):
-    """Computes the vanilla gradients of model output w.r.t inputs.
+	"""Computes the vanilla gradients of model output w.r.t inputs.
 
-    Args:
-        model: keras model
-        X: input array
-        numpy: True to return numpy array, otherwise returns Tensor
+	Args:
+		model: keras model
+		X: input array
+		numpy: True to return numpy array, otherwise returns Tensor
 
-    Returns:
-        Gradients of the predictions w.r.t input
-    """
-    X_tensor = tf.cast(X, tf.float32)
+	Returns:
+		Gradients of the predictions w.r.t input
+	"""
+	X_tensor = tf.cast(X, tf.float32)
 
-    with tf.GradientTape() as tape:
-        tape.watch(X_tensor)
-        preds = model(X_tensor)
+	with tf.GradientTape() as tape:
+		tape.watch(X_tensor)
+		preds = model(X_tensor)
 
-    grads = tape.batch_jacobian(preds, X_tensor)
-    if numpy:
-        grads = grads.numpy()
-    return grads
+	grads = tape.batch_jacobian(preds, X_tensor)
+	if numpy:
+		grads = grads.numpy()
+	return grads
 
 def gradient_input(model, X, numpy=True):
-    """Computes the gradients*inputs, where gradients are of model
-    output wrt input
+	"""Computes the gradients*inputs, where gradients are of model
+	output wrt input
 
-    Args:
-        model: keras model
-        X: input array
-        numpy: True to return numpy array, otherwise returns Tensor
+	Args:
+		model: keras model
+		X: input array
+		numpy: True to return numpy array, otherwise returns Tensor
 
-    Returns:
-        Gradients of the predictions w.r.t input
-    """
-    gradients = vanilla_gradients(model, X, False)
-    gradients_inputs = tf.math.multiply(gradients, X[:,tf.newaxis,:])
-    if numpy:
-        gradients_inputs = gradients_inputs.numpy()
-    return gradients_inputs
+	Returns:
+		Gradients of the predictions w.r.t input
+	"""
+	gradients = vanilla_gradients(model, X, False)
+	gradients_inputs = tf.math.multiply(gradients, X[:,tf.newaxis,:])
+	if numpy:
+		gradients_inputs = gradients_inputs.numpy()
+	return gradients_inputs
 
 def integrated_gradients(model, X, n_steps=20, numpy=True):
-    """Integrated gradients using zero baseline
-    
-    https://keras.io/examples/vision/integrated_gradients/
-    
-    Args:
-        model: keras model
-        X: input array
-        n_steps: number of interpolation steps
-        numpy: True to return numpy array, otherwise returns Tensor
-        
-    Returns:
-        Integrated gradients wrt input
-    """
-    
-    baseline = np.zeros(X.shape).astype(np.float32)
-        
-    # 1. Do interpolation.
-    X = X.astype(np.float32)
-    interpolated_X = [
-        baseline + (step / n_steps) * (X - baseline)
-        for step in range(n_steps + 1)
-    ]
-    interpolated_X = np.array(interpolated_X).astype(np.float32)
-    
-    # 2. Get the gradients
-    grads = []
-    for i, x in enumerate(interpolated_X):
-        grad = vanilla_gradients(model, x)
-        grads.append(grad)
-    
-    # 3. Approximate the integral using the trapezoidal rule
-    grads = np.array(grads)
-    grads = (grads[:-1] + grads[1:]) / 2.0
-    avg_grads = grads.mean(axis=0)
-    
-    # 4. Calculate integrated gradients and return
-    integrated_grads = (X - baseline)[:,np.newaxis,:] * avg_grads
-    
-    return integrated_grads
+	"""Integrated gradients using zero baseline
+	
+	https://keras.io/examples/vision/integrated_gradients/
+	
+	Args:
+		model: keras model
+		X: input array
+		n_steps: number of interpolation steps
+		numpy: True to return numpy array, otherwise returns Tensor
+		
+	Returns:
+		Integrated gradients wrt input
+	"""
+	
+	baseline = np.zeros(X.shape).astype(np.float32)
+		
+	# 1. Do interpolation.
+	X = X.astype(np.float32)
+	interpolated_X = [
+		baseline + (step / n_steps) * (X - baseline)
+		for step in range(n_steps + 1)
+	]
+	interpolated_X = np.array(interpolated_X).astype(np.float32)
+	
+	# 2. Get the gradients
+	grads = []
+	for i, x in enumerate(interpolated_X):
+		grad = vanilla_gradients(model, x)
+		grads.append(grad)
+	
+	# 3. Approximate the integral using the trapezoidal rule
+	grads = np.array(grads)
+	grads = (grads[:-1] + grads[1:]) / 2.0
+	avg_grads = grads.mean(axis=0)
+	
+	# 4. Calculate integrated gradients and return
+	integrated_grads = (X - baseline)[:,np.newaxis,:] * avg_grads
+	
+	return integrated_grads
 
 def smoothed_gradients(model, X, noise=1.0, n_samples=10, numpy=True):
-    """SmoothGrad
-    
-    Args:
-        model: keras model
-        X: input array
-        noise: variance of Gaussian noise added to each pixel
-        n_samples: number of noisy samples
-        numpy: True to return numpy array, otherwise returns Tensor
-        
-    Returns:
-        SmoothGrad wrt input
-    """
-    X = X.astype(np.float32)
-    
-    # 1. Add noise then get the gradients
-    noisy_grads = []
-    for i in range(n_samples):
-        noisy_grad = vanilla_gradients(model, X + np.random.normal(0.0, noise, X.shape))
-        noisy_grads.append(noisy_grad)
-    noisy_grads = tf.convert_to_tensor(noisy_grads, dtype=tf.float32)
-    
-    # 2. Mean noisy gradient
-    avg_noisy_grads = tf.reduce_mean(noisy_grads, axis=0)
-    
-    if numpy:
-        avg_noisy_grads = avg_noisy_grads.numpy()
-    return avg_noisy_grads
+	"""SmoothGrad
+	
+	Args:
+		model: keras model
+		X: input array
+		noise: variance of Gaussian noise added to each pixel
+		n_samples: number of noisy samples
+		numpy: True to return numpy array, otherwise returns Tensor
+		
+	Returns:
+		SmoothGrad wrt input
+	"""
+	X = X.astype(np.float32)
+	
+	# 1. Add noise then get the gradients
+	noisy_grads = []
+	for i in range(n_samples):
+		noisy_grad = vanilla_gradients(model, X + np.random.normal(0.0, noise, X.shape))
+		noisy_grads.append(noisy_grad)
+	noisy_grads = tf.convert_to_tensor(noisy_grads, dtype=tf.float32)
+	
+	# 2. Mean noisy gradient
+	avg_noisy_grads = tf.reduce_mean(noisy_grads, axis=0)
+	
+	if numpy:
+		avg_noisy_grads = avg_noisy_grads.numpy()
+	return avg_noisy_grads
 
 def guided_backprop(model, X, numpy=True):
-    preds = model(X)[:,:,tf.newaxis]
-    grads = vanilla_gradients(model, X, False)
-    
-    guided_grads = (
-                tf.cast(preds > 0, "float32")
-                * tf.cast(preds > 0, "float32")
-                * grads
-            )
-    if numpy:
-        guided_grads = guided_grads.numpy()
-    return guided_grads
+	preds = model(X)[:,:,tf.newaxis]
+	grads = vanilla_gradients(model, X, False)
+	
+	guided_grads = (
+				tf.cast(preds > 0, "float32")
+				* tf.cast(preds > 0, "float32")
+				* grads
+			)
+	if numpy:
+		guided_grads = guided_grads.numpy()
+	return guided_grads

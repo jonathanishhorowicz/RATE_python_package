@@ -166,8 +166,12 @@ class BnnBase(BaseEstimator, metaclass=ABCMeta):
 		return M_w
 
 	def post_cov_weights(self):
-		dist_list = self._logit_model._layers[-1]._posterior(tf.zeros(1))._distributions
-		return tf.stack([d.covariance() for d in dist_list[:self.C]])
+		try:
+			dist_list = self._logit_model._layers[-1]._posterior(tf.zeros(1))._distributions
+			return tf.stack([d.covariance() for d in dist_list[:self.C]])
+		except:
+			weight_vars = self._logit_model._layers[-1]._posterior(tf.zeros(1))._distributions[0].variance()
+			return tf.linalg.diag(tf.split(weight_vars, self.C))
 
 	def post_mean_bias(self):
 		bias_dist = self._logit_model._layers[-1]._posterior(tf.zeros(1))._distributions[-1]
