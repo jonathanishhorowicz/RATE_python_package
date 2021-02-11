@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.linear_model import RidgeCV
 
 from abc import ABCMeta, abstractmethod
 
@@ -83,7 +84,7 @@ class PseudoinverseProjection(ProjectionBase):
 				2. array of posterior covariances with shape (n_classes, n_variables, n_variables)
 		"""
 
-		logger.debug("Calculating ESA posterior using the covariance projection. Input shapes: X : {}, M_F : {} and V_F : {}".format(X.shape, M_F.shape, V_F.shape))
+		logger.debug("Calculating ESA posterior using the p-inv projection. Input shapes: X : {}, M_F : {} and V_F : {}".format(X.shape, M_F.shape, V_F.shape))
 
 		# Check if X has been cached
 		if self._X is None:
@@ -106,3 +107,125 @@ class PseudoinverseProjection(ProjectionBase):
 		return M_B, V_B
 
 
+class RidgeProjection(ProjectionBase):
+	"""The pseudoinverse projection with an L2 penalty.
+	
+	lambda = 1/(2*alpha) where alpha is the inverse penalty used in 
+	sklearn. This is selected using LOOCV.
+	
+	Attributes
+		- alphas: sequence of alpha values
+	"""
+	def __init__(self, alphas=np.logspace(-5, 5, 11)):
+		super().__init__()
+		self.alphas = alphas
+		self.model = None
+		self.lambdas = []
+		
+	def esa_posterior(self, X, M_F, V_F):
+		"""Calculate the mean and covariance of the effect size analogue posterior.
+
+		Args:
+			X: array of inputs with shape (n_examples, n_variables)
+			M_F: array of logit posterior means with shape (n_classes, n_examples)
+			V_F: array of logit posterior covariances with shape (n_classes, n_examples, n_examples)
+			**kwargs: passed to RidgeCV.fit
+		
+		Returns:
+			effect_size_analogue_posterior: a 2-tuple containing:
+				1. array of posterior means with shape (n_variables, n_classes)
+				2. array of posterior covariances with shape (n_classes, n_variables, n_variables)
+		"""
+		
+		if M_F.shape[0] != V_F.shape[0]:
+			raise ValueError("Number of classes must match ({}!={})".format(M_F.shape[0], V_F.shape[0]))
+		
+		# fit a model per target to select penalty
+		logger.debug("Calculating esa posterior using RidgeProjection")
+		logger.debug("Input shapes: X: {}\tM_F: {}\tRidgeProjection_F:{}".format(
+			X.shape, M_F.shape, V_F.shape))
+		logger.debug("Fitting {} ridge estimators to find lambda".format(
+			M_F.shape[0]))
+		logger.debug("Trying {} alphas from {} to {}".format(
+			len(self.alphas), np.amin(self.alphas), np.amax(self.alphas)))
+		
+		self.model = [
+			RidgeCV(alphas=self.alphas, fit_intercept=False, normalize=False).fit(X, M_F[c])
+					for c in range(M_F.shape[0])
+		]
+				
+		self.lambdas = [1.0/(2.0*m.alpha_) for m in self.model]
+		logger.debug("Selected lambdas: {}".format(self.lambdas))
+		
+		# Calculate effect size analogue posterior mean and covariance
+		logger.debug("Calculating regularised pseudoinverses")
+		X_pinvs = self._solve_reg_pinv(X)
+		
+		logger.debug("Calculating esa posterior mean")
+		M_B = [np.matmul(X_pinvs[c], M_F[c,:,np.newaxis]).squeeze(axis=1) for c in range(len(X_pinvs))]
+		
+		logger.debug("Calculating esa posterior covariance")
+		V_B = [np.matmul(np.matmul(X_pinvs[c], V_F[c]), X_pinvs[c].T) for c in range(len(X_pinvs))]
+		
+		return np.array(M_B), np.array(V_B)
+		
+	def _solve_reg_pinv(self, X):
+		"""
+		Returns solve(X' X + lam*I, X') for each lambda (one per class)
+
+		lambda = 1/(2*alpha)
+		"""
+		return [
+			np.linalg.solve(np.dot(X.T, X) + lam * np.identity(X.shape[1]), X.T)
+			for lam in self.lambdas
+		]	
+
+# class PseudoinverseProjection(ProjectionBase):
+#     """The pseudoinverse projection
+
+#     Attributes:
+#         - lam (float): regularisation strength
+#     """
+#     def __init__(self, lam=0.0):
+#         super().__init__()
+#         self._X_dagger = None
+#         self.lam = lam
+
+#     def esa_posterior(self, X, M_F, V_F):
+#         """Calculate the mean and covariance of the effect size analogue posterior.
+
+#         Args:
+#             X: array of inputs with shape (n_examples, n_variables)
+#             M_F: array of logit posterior means with shape (n_classes, n_examples)
+#             V_F: array of logit posterior covariances with shape (n_classes, n_examples, n_examples)
+		
+#         Returns:
+#             effect_size_analogue_posterior: a 2-tuple containing:
+#                 1. array of posterior means with shape (n_variables, n_classes)
+#                 2. array of posterior covariances with shape (n_classes, n_variables, n_variables)
+#         """
+
+#         logger.debug("Calculating ESA posterior using the p-inv projection. Input shapes: X : {}, M_F : {} and V_F : {}".format(X.shape, M_F.shape, V_F.shape))
+
+#         # Check if X has been cached
+#         if self._X is None:
+#             logger.debug("No X is cached - calculating pinv(X) and storing it")
+#             self._X = X
+#             self._X_dagger = self._solve(self._X)
+#         elif not np.array_equal(self._X, X):
+#             logger.debug("Does not match cached X: calculating new pinv(X) and storing it")
+#             self._X = X
+#             self._X_dagger = self._solve(self._X) #np.linalg.pinv(self._X + self.lam*np.eye())
+
+#         logger.debug("_X has shape {}, _X_dagger has shape {}".format(self._X.shape, self._X_dagger.shape))
+
+#         # Calculate effect size analogue posterior mean and variance
+#         M_B = np.matmul(self._X_dagger, M_F[:,:,np.newaxis])[:,:,0]
+#         V_B = np.matmul(np.matmul(self._X_dagger, V_F), self._X_dagger.T)
+		
+#         logger.debug("Output shapes: M_B: {}, V_B: {}".format(M_B.shape, V_B.shape))
+
+#         return M_B, V_B
+	
+#     def _solve(self, X):
+#         return np.linalg.solve(np.dot(X.T, X) + self.lam * np.identity(X.shape[1]), X.T)
