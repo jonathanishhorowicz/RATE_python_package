@@ -21,7 +21,6 @@ def qr_solve(A, b):
 	Q, R = np.linalg.qr(A)
 	return np.matmul(solve_triangular(R, Q.T), b)
 
-
 def rate2(
 	X,
 	M_F, V_F,
@@ -31,7 +30,6 @@ def rate2(
 	groups=None,
 	solver="qr",
 	jitter=1e-9,
-	pinv_rcond=1e-15,
 	clip_KLDs=False):
 	"""
 	Calculate RATE values without inverting the entire covariance matrix at once.
@@ -85,20 +83,23 @@ def rate2(
 			logger.warning("{} variables are not in a group, excluded or nullified".format(vars_in_groups.sum()))
 
 
-	if excluded_vars is not None:
+	if len(excluded_vars) > 0:
 		vars_to_keep = np.arange(X.shape[1])[~np.isin(np.arange(X.shape[1]), excluded_vars)]
-		logger.info("Removing {} variables. {} remain".format(
-			len(excluded_vars), vars_to_keep.sum()
+		logger.debug("Removing {} variables. {} remain".format(
+			len(excluded_vars), vars_to_keep.shape[0]
 		))
-	else:
-		vars_to_keep = range(p)
+		X = X[:,vars_to_keep]
 
-	
+	if len(nullify) > 0:
+		logger.debug("The following {} variables are nullifed: {}".format(
+						len(nullify), nullify))
+
 	C = M_F.shape[0]
 	p = X.shape[1]
 
 	# effect size analogue posterior
 	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
+	logger.debug("M_B shape is {}, V_B shape is {}".format(M_B.shape, V_B.shape))
 	logger.info("V_B has rank {}".format(np.linalg.matrix_rank(V_B)))
 	
 	# symmetrise V_Bs
@@ -114,18 +115,15 @@ def rate2(
 	# setup the variables to be iterated over
 	if groups is None:
 		if len(nullify)==0:
-			J = [np.array([j]) for j in vars_to_keep]
+			J = [np.array([j]) for j in range(p)]
 		else:
-			logger.debug("The following {} variables are nullifed: {}".format(
-				len(nullify), nullify))
-			J = [np.array([j]) for j in vars_to_keep if j not in nullify]
+			J = [np.array([j]) for j in range(p) if j not in nullify]
 	else:
 		J = [np.array(g) for g in groups]
+	
 		if len(nullify)>0:
 			J = [np.concatenate([j,nullify]) for j in J]
 			
-			
-		
 	#
 	# store the terms in the KLD separately
 	KLDs = [np.zeros((len(J), 4)) for _ in range(C)]
@@ -151,7 +149,7 @@ def rate2(
 			if len(nullify) > 0:
 				j = np.array(np.unique(np.concatenate((j, nullify)), axis=0))
 				
-			logger.debug("at iteration {} j has shape {} and type {}".format(out_idx, j.shape, j.dtype))
+			logger.debug("at iteration {} j={} has shape {} and type {}".format(out_idx, j, j.shape, j.dtype))
 			
 			mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(M_B[c], V_B[c], j)
 			
@@ -198,6 +196,8 @@ def rate2(
 	) for x in cov_matrix_ranks]
 
 	return [KLDs, cov_matrix_ranks]
+
+
 def kl_mvn(m0, S0, m1, S1, jitter=0.0):
 	"""
 	Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
@@ -237,7 +237,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0):
 	
 	return [
 			[quad_term, tr_term, det_term, .5 * (tr_term + det_term + quad_term - N)],
-			[np.linalg.matrix_rank(S0), np.linalg.matrix_rank(S1)]
+			[np.linalg.matrix_rank(S0), np.linalg.matrix_rank(S1), np.linalg.matrix_rank(iS1S0)]
 		   ]
 
 def make_extra_rows(var_list, fill_value, include_groupcol):
@@ -334,7 +334,7 @@ def Wasserstein_gaussian(mu_0, Sigma_0, mu_1, Sigma_1):
 	logger.debug("calcuating np.dot(first_term, sqrtK_0)")
 	K_0_K_1_K_0 = np.dot(first_term, sqrtK_0)
 
-	logger.debug("calcuating np.trace(Sigma_0) + np.trace(Sigma_1) - 2.0 * np.trace(sqrtm(K_0_K_1_K_0))")	
+	logger.debug("calcuating np.trace(Sigma_0) + np.trace(Sigma_1) - 2.0 * np.trace(sqrtm(K_0_K_1_K_0))")   
 	cov_dist = np.trace(Sigma_0) + np.trace(Sigma_1) - 2.0 * np.trace(sqrtm(K_0_K_1_K_0))
 
 	logger.debug("calcuating np.sum(np.square(np.abs(mu_0 - mu_1)))")
