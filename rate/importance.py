@@ -13,7 +13,6 @@ from sklearn.model_selection import RandomizedSearchCV
 
 import logging
 logger = logging.getLogger(__name__)
-#logger.addHandler(TqdmLoggingHandler())
 
 def qr_solve(A, b):
 	"""Solve Ax=b for x using the QR decomposition
@@ -82,17 +81,30 @@ def rate2(
 		if not vars_in_groups.all():
 			logger.warning("{} variables are not in a group, excluded or nullified".format(vars_in_groups.sum()))
 
+	p_original = X.shape[1]
 
 	if len(excluded_vars) > 0:
+		recode_vars = True
 		vars_to_keep = np.arange(X.shape[1])[~np.isin(np.arange(X.shape[1]), excluded_vars)]
 		logger.debug("Removing {} variables. {} remain".format(
 			len(excluded_vars), vars_to_keep.shape[0]
 		))
+		new2old_map = dict(zip(range(vars_to_keep.shape[0]), vars_to_keep))
+		old2new_map = dict(zip(vars_to_keep, range(vars_to_keep.shape[0])))
+		
 		X = X[:,vars_to_keep]
+		
+		# recode input variable indices since some have been removed
+		if len(nullify)>0:
+			nullify = [old2new_map[idx] for idx in nullify]
+		
+		if groups is not None:
+			groups = [[old2new_map[idx] for idx in g] for g in groups]
+	else:
+		recode_vars = False
 
 	if len(nullify) > 0:
-		logger.debug("The following {} variables are nullifed: {}".format(
-						len(nullify), nullify))
+		logger.debug("{} variables are nullifed".format(len(nullify)))
 
 	C = M_F.shape[0]
 	p = X.shape[1]
@@ -151,6 +163,7 @@ def rate2(
 				
 			logger.debug("at iteration {} j={} has shape {} and type {}".format(out_idx, j, j.shape, j.dtype))
 			
+			# partition mean and covariance
 			mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(M_B[c], V_B[c], j)
 			
 			# conditional distribution
@@ -158,35 +171,48 @@ def rate2(
 				mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j
 			)
 			
-			# store results
+			# store KLD results
 			tmp = kl_mvn(
 				mu_min_j, Sigma_min_j, mu_cond, Sigma_cond,
 				jitter=jitter)
 
 			KLDs[c][out_idx] = tmp[0]
 			cov_matrix_ranks[c][out_idx] = matrix_ranks_and_shapes
+	
 	#   
 	# format final result
 	KLDs = [pd.DataFrame(klds, columns=["quad", "trace", "det", "KLD"]) for klds in KLDs]
 	if groups is None:
-		[KLDs[c].insert(0, "variable", np.array(J).squeeze(axis=1)) for c in range(C)]
+		variable_column = np.array(J).squeeze(axis=1)
+		if recode_vars:
+			variable_column = [new2old_map[idx] for idx in variable_column]
+		[KLDs[c].insert(0, "variable", variable_column) for c in range(C)]
 	else:
+		if recode_vars:
+			groups = [[new2old_map[idx] for idx in g] for g in groups]
 		[KLDs[c].insert(0, "group", ["group{}".format(x) for x in range(len(groups))]) for c in range(C)]
 		[KLDs[c].insert(1, "variable", groups) for c in range(C)]
 		KLDs = [kld.explode("variable") for kld in KLDs]
-		
+				
 	#
 	# add excluded/nullified indices
 	if len(nullify) > 0:
+		if recode_vars:
+			nullify = [new2old_map[idx] for idx in nullify]
 		extra_rows = make_extra_rows(nullify, "nullified", groups is not None)
 		KLDs = [pd.concat([kld, extra_rows], axis=0) for kld in KLDs]
 		
 	if len(excluded_vars) > 0:
 		extra_rows = make_extra_rows(excluded_vars, "excluded", groups is not None)
-
 		KLDs = [pd.concat([kld, extra_rows], axis=0) for kld in KLDs]
 		
-	
+	# variable indices should be ints all should be present in output
+	for kld in KLDs:
+		kld.variable = kld.variable.astype(int)
+		kld.sort_values(by="variable", inplace=True)
+		assert np.isin(np.arange(p_original), kld.variable.unique()).all()
+		assert kld.shape[0]==p_original
+		
 	cov_matrix_ranks = [pd.DataFrame(
 		x,
 		columns=[
@@ -241,20 +267,17 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0):
 		   ]
 
 def make_extra_rows(var_list, fill_value, include_groupcol):
-	df = pd.DataFrame(
-			np.concatenate(
-			[
-				np.array(var_list)[:,np.newaxis],
-				np.full([len(var_list), 3], np.nan),
-				np.full([len(var_list), 1], fill_value)
-			],
-			axis=1),
-			columns=["variable", "quad", "trace", "det", "KLD"]
-			)
+	df = pd.concat(
+		[
+			pd.Series(var_list, index=range(len(var_list)), name="variable"),
+			pd.DataFrame(np.nan, index=range(len(var_list)), columns=["quad", "trace", "det"]),
+			pd.Series(fill_value, index=range(len(var_list)), name="KLD")
+		],
+		axis=1)
+
 	if include_groupcol:
 		df.insert(0, "group", ["no_group" for _ in range(df.shape[0])])
 	return df
-
 
 def jth_partition(mu, Sigma, j):
 	"""
