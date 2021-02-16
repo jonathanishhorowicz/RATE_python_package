@@ -29,7 +29,7 @@ def rate2(
 	groups=None,
 	solver="qr",
 	jitter=1e-9,
-	clip_KLDs=False):
+	det_fn=np.linalg.det):
 	"""
 	Calculate RATE values without inverting the entire covariance matrix at once.
 	
@@ -49,7 +49,9 @@ def rate2(
 						Not the same as nullify. Default is an empty list.
 		groups: list of lists defining the variable groupings. Default is None (no groups).
 		solver: If 'qr', solve the linear system using QR (default). Choose 'lstsq' for a least-squares solution.
-		
+		jitter: added to diagonal of covariance matrices in KL divergence calculation
+		det_fn: the function used to compute determinants in KL divergence calculation
+
 	Returns:
 		Length-2 list containing
 			- list of dataframes of decomposed KLDs (one per class)
@@ -174,7 +176,8 @@ def rate2(
 			# store KLD results
 			tmp = kl_mvn(
 				mu_min_j, Sigma_min_j, mu_cond, Sigma_cond,
-				jitter=jitter)
+				jitter=jitter,
+				det_fn=det_fn)
 
 			KLDs[c][out_idx] = tmp[0]
 			cov_matrix_ranks[c][out_idx] = matrix_ranks_and_shapes
@@ -224,7 +227,7 @@ def rate2(
 	return [KLDs, cov_matrix_ranks]
 
 
-def kl_mvn(m0, S0, m1, S1, jitter=0.0):
+def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det):
 	"""
 	Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
 	Also computes KL divergence from a single Gaussian pm,pv to a set
@@ -233,6 +236,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0):
 	- accepts stacks of means, but only one S0 and S1
 	- returns the three terms separately plus the total KLD in one list
 	- also returns rank of S1 and S0 in a second list
+	- can control the how the determinant is calculated using det_fn (may want to swap to pseudo-determinant)
 	
 	https://stackoverflow.com/questions/44549369/kullback-leibler-divergence-from-gaussian-pm-pv-to-gaussian-qm-qv
 
@@ -252,7 +256,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0):
 	# kl is made of three terms
 	iS1S0 = np.linalg.solve(S1, S0)
 	tr_term   = np.trace(iS1S0)
-	det_term  = np.log((np.linalg.det(S1)/np.linalg.det(S0)) + 1e-9) 
+	det_term  = np.log((det_fn(S1)/det_fn(S0)) + 1e-9) 
 	quad_term = diff.T @ np.linalg.solve(S1, diff) 
 
 	logger.debug("quad_term: {} \t tr_term: {} \t det_term: {}".format(
