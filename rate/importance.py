@@ -55,6 +55,11 @@ def rate2(
 			- list of dataframes of decomposed KLDs (one per class)
 			- list of ranks of various intermediate matrices (one per class)
 	"""
+
+	logger.debug("Input shapes:\n\tX: {}, M_F: {} V_F: {}".format(X.shape, M_F.shape, V_F.shape))
+	logger.info("RATE calcuation with {} variables, {} of which are nullified, {} of which are excluded".format(X.shape[1], len(nullify), len(excluded_vars)))
+	if groups is not None:
+		logger.info("Using {} groups".format(len(groups)))
 	
 	# some input checks
 	if len(nullify)>0 and len(excluded_vars)>0:
@@ -79,7 +84,7 @@ def rate2(
 		)
 
 		if not vars_in_groups.all():
-			logger.warning("{} variables are not in a group, excluded or nullified".format(vars_in_groups.sum()))
+			logger.warning("{} variables are not in a group, excluded or nullified".format(np.invert(vars_in_groups).sum()))
 
 	p_original = X.shape[1]
 
@@ -207,7 +212,7 @@ def rate2(
 		if not np.isin(np.arange(p_original), kld.variable.unique()).all():
 			logger.warning("Some variables missing from a KLD dataframe")
 		if kld.shape[0]!=p_original:
-			logger.warning("kld shape[0] ({}) does not match p_original ({})",format(kld.shape[0], p_original))
+			logger.warning("kld shape[0] ({}) does not match p_original ({})".format(kld.shape[0], p_original))
 		
 	cov_matrix_ranks = [pd.DataFrame(
 		x,
