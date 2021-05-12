@@ -27,7 +27,6 @@ def rate2(
 	nullify=[],
 	excluded_vars=[],
 	groups=None,
-	solver="qr",
 	jitter=1e-9,
 	det_fn=np.linalg.det):
 	"""
@@ -48,7 +47,6 @@ def rate2(
 		excluded_vars: list of variable indices of variables that are totally excluded from the calculation.
 						Not the same as nullify. Default is an empty list.
 		groups: list of lists defining the variable groupings. Default is None (no groups).
-		solver: If 'qr', solve the linear system using QR (default). Choose 'lstsq' for a least-squares solution.
 		jitter: added to diagonal of covariance matrices in KL divergence calculation
 		det_fn: the function used to compute determinants in KL divergence calculation
 
@@ -114,7 +112,7 @@ def rate2(
 	# effect size analogue posterior
 	M_B, V_B = projection.esa_posterior(X, M_F, V_F)
 	logger.debug("M_B shape is {}, V_B shape is {}".format(M_B.shape, V_B.shape))
-	logger.info("V_B has rank {}".format(np.linalg.matrix_rank(V_B)))
+	logger.debug("V_B has rank {}".format(np.linalg.matrix_rank(V_B)))
 	
 	# symmetrise V_Bs
 	for c,v in enumerate(V_B):
@@ -143,22 +141,15 @@ def rate2(
 	KLDs = [np.zeros((len(J), 4)) for _ in range(C)]
 	cov_matrix_ranks = [np.zeros((len(J), 6)) for _ in range(C)]
 
-	#
-	# the solver for the linear system in the KLD term
-	if solver == "qr":
-		alpha_solve_fn = qr_solve
-	elif solver == "lstsq":
-		alpha_solve_fn = lambda A, b: np.linalg.lstsq(A, b, rcond=None)[0]
-	else:
-		logger.warning("Unrecognised solver {}, using qr".format(solver))
-		alpha_solve_fn = qr_solve
-
 	# calculate rate values per class
 	for c in range(C):
-		logger.info("Calculating RATE values for class {} of {}".format(c+1, C))
+		logger.info("Calculating RATE values for class {} of {} ({} iterations)".format(c+1, C, len(J)))
 		logger.debug("V_B[{}] has rank {}".format(c, np.linalg.matrix_rank(V_B[c])))
 
 		for out_idx, j in enumerate(J):
+
+			if len(J)>100 and out_idx%100==0:
+				logger.info("iteration {} of {}".format(out_idx, len(J)))
 							
 			if len(nullify) > 0:
 				j = np.array(np.unique(np.concatenate((j, nullify)), axis=0))
@@ -201,7 +192,7 @@ def rate2(
 	# add excluded/nullified indices
 	if len(nullify) > 0:
 		if recode_vars:
-			nullify = [new2old_map[idx] for idx in nullify]
+					nullify = [new2old_map[idx] for idx in nullify]
 		extra_rows = make_extra_rows(nullify, "nullified", groups is not None)
 		KLDs = [pd.concat([kld, extra_rows], axis=0) for kld in KLDs]
 		
@@ -213,8 +204,10 @@ def rate2(
 	for kld in KLDs:
 		kld.variable = kld.variable.astype(int)
 		kld.sort_values(by="variable", inplace=True)
-		assert np.isin(np.arange(p_original), kld.variable.unique()).all()
-		assert kld.shape[0]==p_original
+		if not np.isin(np.arange(p_original), kld.variable.unique()).all():
+			logger.warning("Some variables missing from a KLD dataframe")
+		if kld.shape[0]!=p_original:
+			logger.warning("kld shape[0] ({}) does not match p_original ({})",format(kld.shape[0], p_original))
 		
 	cov_matrix_ranks = [pd.DataFrame(
 		x,
@@ -254,10 +247,10 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det):
 		S1 += jitter * np.identity(S0.shape[0])
 
 	# kl is made of three terms
-	iS1S0 = np.linalg.solve(S1, S0)
+	iS1S0 = np.linalg.lstsq(S1, S0, rcond=None)[0]
 	tr_term   = np.trace(iS1S0)
 	det_term  = np.log((det_fn(S1)/det_fn(S0)) + 1e-9) 
-	quad_term = diff.T @ np.linalg.solve(S1, diff) 
+	quad_term = diff.T @ np.linalg.lstsq(S1, diff, rcond=None)[0] 
 
 	logger.debug("quad_term: {} \t tr_term: {} \t det_term: {}".format(
 		quad_term, tr_term, det_term
@@ -329,11 +322,11 @@ def condition_gaussian(mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j):
 	
 	Returns two lists: mean/covariance in item 0 and the ranks/shapes of relevant matrices in item 1
 	"""
-	mu_cond = mu_min_j - np.dot(sigma_min_j, np.linalg.solve(sigma_j, mu_j))
+	mu_cond = mu_min_j - np.dot(sigma_min_j, np.linalg.lstsq(sigma_j, mu_j, rcond=None)[0])
 	#print("\n\tmu_cond: {}".format(mu_cond.shape))
 	
 	# is this is a low-rank update? 
-	Sigma_update = np.dot(sigma_min_j, np.linalg.solve(sigma_j, sigma_min_j.T))
+	Sigma_update = np.dot(sigma_min_j, np.linalg.lstsq(sigma_j, sigma_min_j.T, rcond=None)[0])
 	Sigma_cond = Sigma_min_j - Sigma_update
 	
 	matrix_ranks_and_shapes = [
