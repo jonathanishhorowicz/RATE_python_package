@@ -28,7 +28,8 @@ def rate2(
 	excluded_vars=[],
 	groups=None,
 	jitter=1e-9,
-	det_fn=np.linalg.det):
+	det_fn=np.linalg.det,
+	printevery=0):
 	"""
 	Calculate RATE values without inverting the entire covariance matrix at once.
 	
@@ -153,7 +154,7 @@ def rate2(
 
 		for out_idx, j in enumerate(J):
 
-			if len(J)>100 and out_idx%100==0:
+			if printevery!=0 and out_idx%printevery==0:
 				logger.info("iteration {} of {}".format(out_idx, len(J)))
 							
 			if len(nullify) > 0:
