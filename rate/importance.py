@@ -20,6 +20,12 @@ def qr_solve(A, b):
 	Q, R = np.linalg.qr(A)
 	return np.matmul(solve_triangular(R, Q.T), b)
 
+# def init_rate():
+# 	pass
+
+# def rate_iteration():
+# 	pass
+
 def rate2(
 	X,
 	M_F, V_F,
@@ -27,8 +33,10 @@ def rate2(
 	nullify=[],
 	excluded_vars=[],
 	groups=None,
+	exact=True,
 	jitter=1e-9,
 	det_fn=np.linalg.det,
+	chunk_spec=None,
 	printevery=0):
 	"""
 	Calculate RATE values without inverting the entire covariance matrix at once.
@@ -48,7 +56,9 @@ def rate2(
 		excluded_vars: list of variable indices of variables that are totally excluded from the calculation.
 						Not the same as nullify. Default is an empty list.
 		groups: list of lists defining the variable groupings. Default is None (no groups).
+		exact: whether to calculate the log and trace terms in the KLD
 		jitter: added to diagonal of covariance matrices in KL divergence calculation
+		chunk_spec: (i,j) to run the i-th chunk of iterations out of j total chunks or None (no chunking).
 		det_fn: the function used to compute determinants in KL divergence calculation
 
 	Returns:
@@ -141,7 +151,14 @@ def rate2(
 	
 		if len(nullify)>0:
 			J = [np.concatenate([j,nullify]) for j in J]
-			
+
+	# if running as a batch job we split into chunks
+	if chunk_spec is not None:
+		chunk_idx, n_chunks = chunk_spec
+		logger.info("Splitting iterations into {} chunks, this is chunk {}".format(n_chunks, chunk_idx))
+		J_chunk_idxs = np.array_split(range(len(J)), n_chunks)[chunk_idx]
+		logger.debug("J_chunk_idxs={}".format(J_chunk_idxs))
+				
 	#
 	# store the terms in the KLD separately
 	KLDs = [np.zeros((len(J), 4)) for _ in range(C)]
@@ -153,6 +170,12 @@ def rate2(
 		logger.debug("V_B[{}] has rank {}".format(c, np.linalg.matrix_rank(V_B[c])))
 
 		for out_idx, j in enumerate(J):
+			
+			if chunk_spec is not None:
+				if out_idx not in J_chunk_idxs:
+					KLDs[c][out_idx] = None
+					cov_matrix_ranks[c][out_idx] = None
+					continue
 
 			if printevery!=0 and out_idx%printevery==0:
 				logger.info("iteration {} of {}".format(out_idx, len(J)))
@@ -174,7 +197,8 @@ def rate2(
 			tmp = kl_mvn(
 				mu_min_j, Sigma_min_j, mu_cond, Sigma_cond,
 				jitter=jitter,
-				det_fn=det_fn)
+				det_fn=det_fn,
+				exact=exact)
 
 			KLDs[c][out_idx] = tmp[0]
 			cov_matrix_ranks[c][out_idx] = matrix_ranks_and_shapes
@@ -187,6 +211,7 @@ def rate2(
 		if recode_vars:
 			variable_column = [new2old_map[idx] for idx in variable_column]
 		[KLDs[c].insert(0, "variable", variable_column) for c in range(C)]
+		
 	else:
 		if recode_vars:
 			groups = [[new2old_map[idx] for idx in g] for g in groups]
@@ -215,6 +240,9 @@ def rate2(
 		if kld.shape[0]!=p_original:
 			logger.warning("kld shape[0] ({}) does not match p_original ({})".format(kld.shape[0], p_original))
 		
+		if chunk_spec is not None:
+			kld.drop(index=kld.loc[~kld.index.isin(J_chunk_idxs)].index, inplace=True)
+			
 	cov_matrix_ranks = [pd.DataFrame(
 		x,
 		columns=[
@@ -226,7 +254,7 @@ def rate2(
 	return [KLDs, cov_matrix_ranks]
 
 
-def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det):
+def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det, exact=True):
 	"""
 	Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
 	Also computes KL divergence from a single Gaussian pm,pv to a set
@@ -253,17 +281,19 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det):
 		S1 += jitter * np.identity(S0.shape[0])
 
 	# kl is made of three terms
-	iS1S0 = np.linalg.lstsq(S1, S0, rcond=None)[0]
-	tr_term   = np.trace(iS1S0)
-	det_term  = np.log((det_fn(S1)/det_fn(S0)) + 1e-9) 
+	if exact:
+		iS1S0 = np.linalg.lstsq(S1, S0, rcond=None)[0]
+		tr_term   = np.trace(iS1S0) # can replace this with the hadamard product
+		det_term  = np.log((det_fn(S1)/det_fn(S0)) + 1e-9)
+	else:
+		tr_term = np.nan
+		det_term = np.nan
 	quad_term = diff.T @ np.linalg.lstsq(S1, diff, rcond=None)[0] 
 
 	logger.debug("quad_term: {} \t tr_term: {} \t det_term: {}".format(
 		quad_term, tr_term, det_term
 	))
-	
-	# kld = .5 * (tr_term + det_term + quad_term - N)
-	
+		
 	return [
 			[quad_term, tr_term, det_term, .5 * (tr_term + det_term + quad_term - N)],
 			[np.linalg.matrix_rank(S0), np.linalg.matrix_rank(S1), np.linalg.matrix_rank(iS1S0)]
