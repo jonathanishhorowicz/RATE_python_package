@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -10,6 +10,23 @@ from scipy.stats import rankdata
 import time
 import logging
 logger = logging.getLogger(__name__)
+
+def safe_rescale(train_arr, test_arr=None):
+    # rescale training data train_arr to mean zero and variance one. Rescales
+    # test_arr with the training mean/variance if provided
+    #
+    # Args:
+    # -  train_arr: numpy array
+    # - test_arr: numpy array
+    #
+    # Returns
+    #   Rescaled arrays 
+    if test_arr is not None:
+        assert train_arr.shape[1]==test_arr.shape[1]
+    ss = StandardScaler()
+    train_arr_ = ss.fit_transform(train_arr)
+    test_arr_ = ss.transform(test_arr) if test_arr is not None else None
+    return train_arr_, test_arr_
 
 def plot_learning_curves(bnn, **kwargs):
 	
@@ -261,7 +278,7 @@ def accuracy_hist(pred_proba_samples, labels):
 	"""
 	sampled_acc = sampled_accuracies(pred_proba_samples, labels)
 	avg_accuracy = round(np.mean(sampled_acc) * 100, 3)
-	print("average accuracy across " + str(pred_proba_samples.shape[0]) + " samples: " + str(avg_accuracy) + "%\n")
+	print("average accuracy across " + str(pred_proba_samples.shape[0]) + " samples: " + str(avg_accuracfy) + "%\n")
 	fig, ax = plt.subplots(figsize=(10,5))
 	sns.distplot(100*sampled_acc, ax=ax, rug=True, kde=False)
 	ax.set_xlabel("Test set accuracy (%)", fontsize=30)
