@@ -11,34 +11,21 @@ import time
 import logging
 logger = logging.getLogger(__name__)
 
-def plot_learning_curves(bnn, plotsize=4):
-    
-	total_epochs = len(bnn.fit_history.history["loss"])
-
-	fig, axes = plt.subplots(
-		1, len(bnn.metrics_names),
-		figsize=(len(bnn.metrics_names)*plotsize, plotsize))
-
-	axes[0].plot(range(total_epochs), bnn.fit_history.history["loss"], '-o', label="training")
-	if 'val_loss' in bnn.fit_history.history:
-		axes[0].plot(range(total_epochs), bnn.fit_history.history["val_loss"], '-o', label="validation")
-	axes[0].legend()
-	axes[0].set_ylabel("ELBO")
-	axes[0].set_xlabel("epoch")
-
-	for i in range(len(bnn.metrics_names)-1):
-		this_metric = bnn.metrics_names[i+1]
-		axes[i+1].plot(range(total_epochs), bnn.fit_history.history[this_metric], '-o', label="training")
-		if "val_{}".format(this_metric) in bnn.fit_history.history:
-			axes[i+1].plot(range(total_epochs), bnn.fit_history.history["val_{}".format(this_metric)], '-o', label="validation")
-		axes[i+1].legend()
-		axes[i+1].set_ylabel(this_metric)
-		axes[i+1].set_xlabel("epoch")
+def plot_learning_curves(bnn, **kwargs):
 	
-	plt.tight_layout()
-	
-	return fig, axes
+	# format dataframe of fit history
+	df = bnn.get_fit_history()
+	df["epoch"] = df.index
+	df = df.melt(id_vars="epoch")
+	df[["split", "metric_name"]] = df.variable.str.split("_", expand=True)
 
+	# make plot
+	g = sns.FacetGrid(df, col="metric_name", hue="split", sharey=False, **kwargs)
+	g.map(sns.lineplot, "epoch", "value")
+	g.add_legend()
+	
+	return g
+	
 def make_1d2d(arr):
 	assert arr.ndim == 1
 	return arr.reshape(arr.shape[0], 1)
@@ -57,47 +44,47 @@ def onehot_encode_labels(y):
 	return OneHotEncoder(categories="auto", sparse=False).fit_transform(y.reshape(y.shape[0],1))
 
 def get_roc_curves(variable_importances):
-    """
+	"""
 	Calculate ROC curves
 
-    # TODO: set row idx as variable
-    
-    Args:
-        variable_importances: A dataframe with the following columns:
-            - method
-            - n
-            - p
-            - repeat_idx
-            - variable
-    """
-    
-    roc_curve_df = pd.DataFrame()
-    base_fpr = np.linspace(0, 1, 101) # Interpolate tpr (y-axis) at these fpr (x-axis) values
+	# TODO: set row idx as variable
+	
+	Args:
+		variable_importances: A dataframe with the following columns:
+			- method
+			- n
+			- p
+			- repeat_idx
+			- variable
+	"""
+	
+	roc_curve_df = pd.DataFrame()
+	base_fpr = np.linspace(0, 1, 101) # Interpolate tpr (y-axis) at these fpr (x-axis) values
 
-    for method in variable_importances["method"].unique():
-        for n in variable_importances["n"].unique():
-            for p in variable_importances["p"].unique():
-                for repeat_idx in range(np.amax(variable_importances["repeat_idx"].unique()+1)):
-                    df = variable_importances.loc[
-                        (variable_importances["method"]==method) &
-                        (variable_importances["repeat_idx"]==repeat_idx) &
-                        (variable_importances["n"]==n) &
-                        (variable_importances["p"]==p)
-                    ]
-                    if len(df)==0:
-                        continue
-                    preds, labels = df["value"].values, df["causal"].values.astype(float)
-                    fpr, tpr, _ = roc_curve(labels, np.abs(preds))
-                    interp_tpr = np.interp(base_fpr, fpr, tpr)
-                    auroc = auc(fpr, tpr)
-                    roc_curve_df = pd.concat([
-                        roc_curve_df,
-                        pd.DataFrame({
-                            "fpr" : base_fpr, "tpr" : interp_tpr, "auc" : auroc,
-                            "method" : method, "n" : n, "p" : p
-                            })
-                    ])
-    return roc_curve_df
+	for method in variable_importances["method"].unique():
+		for n in variable_importances["n"].unique():
+			for p in variable_importances["p"].unique():
+				for repeat_idx in range(np.amax(variable_importances["repeat_idx"].unique()+1)):
+					df = variable_importances.loc[
+						(variable_importances["method"]==method) &
+						(variable_importances["repeat_idx"]==repeat_idx) &
+						(variable_importances["n"]==n) &
+						(variable_importances["p"]==p)
+					]
+					if len(df)==0:
+						continue
+					preds, labels = df["value"].values, df["causal"].values.astype(float)
+					fpr, tpr, _ = roc_curve(labels, np.abs(preds))
+					interp_tpr = np.interp(base_fpr, fpr, tpr)
+					auroc = auc(fpr, tpr)
+					roc_curve_df = pd.concat([
+						roc_curve_df,
+						pd.DataFrame({
+							"fpr" : base_fpr, "tpr" : interp_tpr, "auc" : auroc,
+							"method" : method, "n" : n, "p" : p
+							})
+					])
+	return roc_curve_df
 
 def load_mnist(fashion, onehot_encode=True, flatten_x=False, crop_x=0, classes=None):
 	"""
@@ -126,7 +113,7 @@ def load_mnist(fashion, onehot_encode=True, flatten_x=False, crop_x=0, classes=N
 	else:
 		(x_train, y_train),(x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
 		x_train, x_test = x_train / 255.0, x_test / 255.0  
-        
+		
 	def crop(X, crop_size):
 		assert crop_x < X.shape[1]/2
 		assert crop_x < X.shape[2]/2
@@ -138,7 +125,7 @@ def load_mnist(fashion, onehot_encode=True, flatten_x=False, crop_x=0, classes=N
 
 	# Flatten to 2d arrays (each example 1d)
 	def flatten_image(X):
-	    return X.reshape(X.shape[0], X.shape[1]*X.shape[1])
+		return X.reshape(X.shape[0], X.shape[1]*X.shape[1])
 	if flatten_x:
 		x_train = flatten_image(x_train)
 		x_test = flatten_image(x_test)
@@ -246,7 +233,7 @@ def sampled_accuracies(pred_proba_samples, labels):
 	Args:
 		pred_proba_samples: array of predicted probability samples with shape
 							(n_mc_samples, n_examples, n_classes)/(n_mc_samples, n_examples)
-					   		for multiclass/binary classification. (This is the shape returned by BNN_Classifier.predict).
+							for multiclass/binary classification. (This is the shape returned by BNN_Classifier.predict).
 		labels: array of one-hot encoded labels with shape (n_examples, n_classes) for non-binary clasification
 				or (n_examples,1) for binary classification.
 
@@ -254,7 +241,7 @@ def sampled_accuracies(pred_proba_samples, labels):
 		Array of test accuracies for each round of MC samples with shape (n_mc_samples,)
 	"""
 	binary_labels = labels.shape[1]==1
-    
+	
 	assert pred_proba_samples.shape[1]==labels.shape[0], "Different number of examples in logit samples and labels"
 
 	if not binary_labels:
