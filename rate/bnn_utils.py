@@ -10,34 +10,40 @@ logger = logging.getLogger(__name__)
 
 # prior and posterior for final layer parameters
 # these are passed to DenseVariational layer
-def prior_standardnormal(kernel_size, bias_size, dtype=None):
-    n = kernel_size + bias_size 
-    model = tfk.Sequential([
-        tfp.layers.DistributionLambda(lambda t: tfd.Independent(
-            tfd.Normal(loc=tf.zeros(n, dtype),
-                       scale=ALPHA**0.5*tf.ones(n, dtype)),
-            reinterpreted_batch_ndims=1)
-        )
-    ])
-    return model    
-    
-def posterior_mean_field(kernel_size, bias_size=0, dtype=None):
-    n = kernel_size + bias_size
-    c = np.log(np.expm1(1.))
-    return tfk.Sequential([
-        tfp.layers.VariableLayer(2 * n,
-                                 initializer=tfp.layers.BlockwiseInitializer([
-                                     tf.keras.initializers.GlorotUniform(),
-                                     tf.keras.initializers.Constant(POST_SCALE_VAL),
-                                 ],sizes=[n, n]),
-                                 dtype=dtype),
-        tfp.layers.DistributionLambda(lambda t: tfd.Independent(  # pylint: disable=g-long-lambda
-            tfd.Normal(loc=t[..., :n],
-                       scale=scale_transformer(t[..., n:])),
-            reinterpreted_batch_ndims=1)),
-    ])
+def prior_standardnormal(alpha=1.0):
 
+    def _fn(kernel_size, bias_size, dtype=None):
+        n = kernel_size + bias_size 
+        model = tfk.Sequential([
+            tfp.layers.DistributionLambda(lambda t: tfd.Independent(
+                tfd.Normal(loc=tf.zeros(n, dtype),
+                           scale=alpha**0.5*tf.ones(n, dtype)),
+                reinterpreted_batch_ndims=1)
+            )
+        ])
+        return model
+    return _fn
     
+def posterior_mean_field(scale_init_val):
+
+    def _fn(kernel_size, bias_size, dtype=None):
+
+        n = kernel_size + bias_size
+        return tfk.Sequential([
+            tfp.layers.VariableLayer(2 * n,
+                                     initializer=tfp.layers.BlockwiseInitializer([
+                                         tf.keras.initializers.GlorotUniform(),
+                                         tf.keras.initializers.Constant(scale_transformer(scale_init_val)),
+                                     ],sizes=[n, n]),
+                                     dtype=dtype),
+            tfp.layers.DistributionLambda(lambda t: tfd.Independent(
+                tfd.Normal(loc=t[..., :n],
+                           scale=scale_transformer(t[..., n:])),
+                reinterpreted_batch_ndims=1)),
+        ])
+
+    return _fn
+
 def make_negloglik():
     # returns callable representing the negative log likelihood in the ELBO
     def negloglik(y, p_y):
