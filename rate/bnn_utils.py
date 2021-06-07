@@ -50,12 +50,16 @@ def make_negloglik():
         return -p_y.log_prob(y)
     return negloglik
 
-def scale_transformer(unscaled):
+def scale_transformer(unscaled, method="softmax"):
     # we learn unconstrained parameters for the variances
     # this function controls how the unconstrained parameters are 
     # transformed to be strictly positive
-    # return 1e-3 + tf.math.softplus(0.05 * unscaled)
-    return tf.math.exp(unscaled)
+    if method=="softmax":
+        return 1e-3 + tf.math.softplus(0.05 * unscaled)
+    elif method=="exp":
+        return tf.math.exp(unscaled)
+    else:
+        raise ValueError("Unrecognised method {}".format(method))
 
 def get_params(dv_layer):
     # returns means and variances from a DenseVariational Keras layer
