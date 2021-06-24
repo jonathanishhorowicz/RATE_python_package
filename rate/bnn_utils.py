@@ -24,7 +24,7 @@ def prior_standardnormal(alpha=1.0):
         return model
     return _fn
     
-def posterior_mean_field(scale_init_val):
+def posterior_mean_field_constvar(scale_init_val):
 
     def _fn(kernel_size, bias_size, dtype=None):
 
@@ -34,6 +34,32 @@ def posterior_mean_field(scale_init_val):
                                      initializer=tfp.layers.BlockwiseInitializer([
                                          tf.keras.initializers.GlorotUniform(),
                                          tf.keras.initializers.Constant(scale_transformer(scale_init_val)),
+                                     ],sizes=[n, n]),
+                                     dtype=dtype),
+            tfp.layers.DistributionLambda(lambda t: tfd.Independent(
+                tfd.Normal(loc=t[..., :n],
+                           scale=scale_transformer(t[..., n:])),
+                reinterpreted_batch_ndims=1)),
+        ])
+
+    return _fn
+
+def posterior_mean_field(scale_init_mean, scale_init_stdev):
+
+    if scale_init_stdev==0.0:
+        return posterior_mean_field_constvar(scale_init_mean)
+
+    def _fn(kernel_size, bias_size, dtype=None):
+
+        n = kernel_size + bias_size
+        return tfk.Sequential([
+            tfp.layers.VariableLayer(2 * n,
+                                     initializer=tfp.layers.BlockwiseInitializer([
+                                         tf.keras.initializers.GlorotUniform(),
+                                         tf.keras.initializers.RandomNormal(
+                                             mean=scale_init_mean,
+                                             stddev=scale_init_stdev
+                                         ),
                                      ],sizes=[n, n]),
                                      dtype=dtype),
             tfp.layers.DistributionLambda(lambda t: tfd.Independent(

@@ -63,6 +63,9 @@ class CovarianceProjection(ProjectionBase):
 
 		return M_B, V_B
 
+	def __repr__(self):
+		return "covariance_projection"
+
 class PseudoinverseProjection(ProjectionBase):
 	"""The pseudoinverse projection
 	"""
@@ -105,6 +108,9 @@ class PseudoinverseProjection(ProjectionBase):
 		logger.debug("Output shapes: M_B: {}, V_B: {}".format(M_B.shape, V_B.shape))
 
 		return M_B, V_B
+
+	def __repr__(self):
+		return "ridge_projection"
 
 
 class RidgeProjection(ProjectionBase):
@@ -178,7 +184,9 @@ class RidgeProjection(ProjectionBase):
 		return [
 			np.linalg.solve(np.dot(X.T, X) + lam * np.identity(X.shape[1]), X.T)
 			for lam in self.lambdas
-		]	
+		]
+	def __repr__(self):
+		return "ridge_projection"
 
 # class PseudoinverseProjection(ProjectionBase):
 #     """The pseudoinverse projection
