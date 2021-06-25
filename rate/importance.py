@@ -160,6 +160,9 @@ def setup_rate_iterations(inp: rateInput):
 		chunk_idx, n_chunks = inp.chunk_spec
 		# J_chunk_idxs = np.array_split(range(len(J)), n_chunks)[chunk_idx]
 		J = np.array_split(J, n_chunks)[chunk_idx]
+		var_names = np.array_split(var_names, n_chunks)[chunk_idx]
+		if group_sizes is not None:
+			group_sizes = np.array_split(group_sizes, n_chunks)[chunk_idx]
 		
 	if inp.Mb is None:
 		Mb, Vb = inp.projection.esa_posterior(inp.X, inp.Mf, inp.Vf)
