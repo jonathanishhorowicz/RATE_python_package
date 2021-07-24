@@ -74,7 +74,7 @@ def check_posterior_shapes(m, V, X=None, xcheckdim=0):
 		if m.ndim!=2:
 			raise ValueError("mean should have 2 dimensions (has {})".format(m.ndim))
 		if V.ndim!=3:
-			raise ValueError("covariance should have 3 dimensions (has {})".format(m.ndim))
+			raise ValueError("covariance should have 3 dimensions (has {})".format(V.ndim))
 		n_classes = m.shape[0]
 		dim_size = m.shape[1]
 		

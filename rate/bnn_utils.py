@@ -5,6 +5,9 @@ import tensorflow_probability as tfp
 tfd = tfp.distributions
 import tensorflow_probability.python.layers as tfpl
 
+from tensorflow.keras.layers import Dense
+
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -173,3 +176,90 @@ def logit_posterior(mod, X):
     Vf = np.matmul(Hx, tf.matmul(Vw, tf.transpose(Hx))) + Vb
     
     return Mf, Vf
+
+def compile_network(
+    n_input_dims,
+    task,
+    hidden_spec,
+    n_train_batches,
+    opt_fn,
+    alpha,
+    beta,
+    post_scale_init):
+    """Compile a BNN
+    
+    Args:
+        - n_input_dims (int): number of input dimensions (i.e. p)
+        - task (str): 'reg' (regression) or 'class' (classification)
+        - hidden_spec (list of ints): hidden layer widths
+        - n_train_batches (int): number of training batches
+        - opt_fn (callable): callable returning an optimiser
+        - alpha (float): prior variance
+        - beta (float): KLD weight in ELBO
+        - post_scale_init (tuple of floats): (mean,variance) for posterior stddev initialisation
+    
+    Returns:
+        A compiled Keras model
+    """
+    
+    # deterministic layers
+    model_layers = [
+        Dense(hidden_spec[0], activation="relu", input_shape=(n_input_dims,)),
+    ]
+    
+    for hs in hidden_spec[1:]:
+        model_layers.append(
+            Dense(hs, activation="relu")
+        )
+        
+    if task=="reg":
+        n_params = 2
+    elif task=="class":
+        n_params = 1
+    else:
+        raise ValueError("unrecognised task: {}".format(task))
+        
+        
+    # penultimate (variational layer)
+    model_layers.append(
+        tfpl.DenseVariational(
+            n_params,
+            posterior_mean_field(post_scale_init[0], post_scale_init[1]),
+            prior_standardnormal(alpha),
+            beta/n_train_batches, True)
+    )
+    
+    # final layer
+    if task=="reg":
+        model_layers.append(
+            tfp.layers.DistributionLambda(
+                lambda t: tfd.Normal(
+                    loc=t[..., :1],
+                    scale=scale_transformer(t[..., 1:])))
+            )
+    elif task=="class":
+        model_layers.append(
+            tfp.layers.DistributionLambda(
+                lambda t: tfd.Bernoulli(
+                    logits=t))
+            )
+        
+    # compile model
+    model_loss = lambda y,p_y: -p_y.log_prob(y)
+    model = tfk.Sequential(model_layers)
+    model_metrics = [lambda y_true, y_pred: sum(model.losses)]
+    
+    if task=="reg":
+        model_metrics += ["mse"]
+    elif task=="class":
+        model_metrics += ["acc"]
+    else:
+        raise ValueError("unrecognised task: {}".format(task))
+        
+    model.compile(
+            optimizer=opt_fn(),
+            loss=model_loss,
+            metrics=model_metrics
+    )
+    
+    return model
