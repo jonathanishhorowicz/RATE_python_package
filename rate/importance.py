@@ -244,7 +244,7 @@ def make_rate_result(tracker: rateIterationTracker):
 	# if this is one chunk of many we only save the ESA posterior
 	# in the first chunk
 	if tracker.chunk_spec is not None:
-		if chunk_spec[0]>0:
+		if tracker.chunk_spec[0]>0:
 			tracker.Mb = None
 			tracker.Vb = None
 		  
