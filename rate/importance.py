@@ -6,8 +6,11 @@ from scipy.linalg import solve_triangular, sqrtm
 from typing import NamedTuple, Callable
 from dataclasses import dataclass
 
+import datetime
+
 from .projections import ProjectionBase, CovarianceProjection
 from .utils import isPD
+
 
 import logging
 logger = logging.getLogger(__name__)
@@ -30,10 +33,11 @@ class rateInput:
 	groups: list = None
 	exact: bool = True
 	jitter: float = 0.0
-	det_fn: Callable = np.linalg.det
 	chunk_spec: tuple = None
 	printevery: int = 0
 	run_diagnostics: bool = False
+	save_esa_post: bool = False
+	iteration_timer: bool = False
   
 @dataclass
 class rateIterationTracker:
@@ -47,7 +51,6 @@ class rateIterationTracker:
 	p: int
 	exact: bool
 	jitter: float
-	det_fn: Callable
 	chunk_spec: tuple
 	printevery: int
 	KLDs: np.ndarray
@@ -55,6 +58,8 @@ class rateIterationTracker:
 	var_names: list
 	diagnostic_result: pd.DataFrame
 	group_sizes: list
+	save_esa_post: bool
+	iteration_timer: bool
 		
 @dataclass
 class rateResult:
@@ -172,11 +177,9 @@ def setup_rate_iterations(inp: rateInput):
 	tracker = rateIterationTracker(
 		Mb=Mb, Vb=Vb,
 		projection=inp.projection,
-		#this_it_idx=0,
 		iteration_list=J,
 		C=C, p=p,
 		exact=inp.exact,
-		det_fn=inp.det_fn,
 		jitter=inp.jitter,
 		chunk_spec=inp.chunk_spec,
 		printevery=inp.printevery,
@@ -184,7 +187,9 @@ def setup_rate_iterations(inp: rateInput):
 		grouprate=inp.groups is not None,
 		var_names=var_names,
 		diagnostic_result=[np.empty((len(J), 6), dtype=object) for _ in range(C)] if inp.run_diagnostics else None,
-		group_sizes=group_sizes
+		group_sizes=group_sizes,
+		save_esa_post=inp.save_esa_post,
+		iteration_timer=inp.iteration_timer
 	)
 	
 	return tracker
@@ -192,10 +197,17 @@ def setup_rate_iterations(inp: rateInput):
 def iterate_rate(tracker: rateIterationTracker):
 	
 	for c in range(tracker.C):
+
+		# for timing the iterations
+		if tracker.iteration_timer:
+			iteration_times = []
+
 		for out_idx, j in enumerate(tracker.iteration_list):
+
+			it_start_time = datetime.datetime.now()
 			
 			if tracker.printevery!=0 and out_idx%tracker.printevery==0:
-				logger.info("iteration {} of {}".format(out_idx, len(tracker.iteration_list)))
+				logger.info("iteration {} of {} for class {}".format(out_idx, len(tracker.iteration_list), c))
 			
 			# partition ESA posterior
 			mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(tracker.Mb[c], tracker.Vb[c], j)
@@ -209,14 +221,25 @@ def iterate_rate(tracker: rateIterationTracker):
 			tracker.KLDs[c][out_idx] = kl_mvn(
 				mu_min_j, Sigma_min_j, mu_cond, Sigma_cond,
 				jitter=tracker.jitter,
-				det_fn=tracker.det_fn,
 				exact=tracker.exact)
 			
 			if tracker.diagnostic_result is not None:
 				tracker.diagnostic_result[c][out_idx] = [
 					isPD(Sigma_min_j), np.linalg.matrix_rank(Sigma_min_j), Sigma_min_j.shape[0],
 					isPD(Sigma_cond), np.linalg.matrix_rank(Sigma_cond), Sigma_cond.shape[0]
-				]            
+				]
+
+			# time per iteration and ETA estimate
+			if tracker.iteration_timer:
+				it_end_time = datetime.datetime.now()
+				iteration_times.append(it_end_time-it_start_time)
+				n_remaining_it = len(tracker.iteration_list) - out_idx - 1
+				mean_it_time = np.mean(iteration_times).seconds
+				this_it_td = iteration_times[-1]
+				logger.info("This iteration took {}".format(str(this_it_td)))
+				logger.info("Remaining {} iterations will take approximately {}".format(
+					n_remaining_it, str(this_it_td*n_remaining_it)))
+
 			
 def make_rate_result(tracker: rateIterationTracker):
 	
@@ -247,6 +270,10 @@ def make_rate_result(tracker: rateIterationTracker):
 		if tracker.chunk_spec[0]>0:
 			tracker.Mb = None
 			tracker.Vb = None
+
+	if not tracker.save_esa_post:
+		tracker.Mb = None
+		tracker.Vb = None
 		  
 	res = rateResult(
 		Mb=tracker.Mb,
@@ -270,10 +297,11 @@ def rate(
 	nullify=None,
 	exact=True,
 	jitter=0.0,
-	det_fn=np.linalg.det,
 	chunk_spec=None,
 	printevery=0,
-	run_diagnostics=False
+	run_diagnostics=False,
+	save_esa_post=False,
+	iteration_timer=False
 ):
 	
 	rate_input = rateInput(
@@ -287,10 +315,11 @@ def rate(
 		groups=groups,
 		exact=exact,
 		jitter=jitter,
-		det_fn=det_fn,
 		chunk_spec=chunk_spec,
 		printevery=printevery,
-		run_diagnostics=run_diagnostics
+		run_diagnostics=run_diagnostics,
+		save_esa_post=save_esa_post,
+		iteration_timer=iteration_timer
 	)
 	
 	check_rateInput(rate_input)
@@ -299,7 +328,7 @@ def rate(
 	return make_rate_result(tracker)
 
 
-def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det, exact=True):
+def kl_mvn(m0, S0, m1, S1, jitter=0.0, exact=True):
 	"""
 	Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
 	Also computes KL divergence from a single Gaussian pm,pv to a set
@@ -308,7 +337,6 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det, exact=True):
 	- accepts stacks of means, but only one S0 and S1
 	- returns the three terms separately plus the total KLD in one list
 	- also returns rank of S1 and S0 in a second list
-	- can control the how the determinant is calculated using det_fn (may want to swap to pseudo-determinant)
 	
 	https://stackoverflow.com/questions/44549369/kullback-leibler-divergence-from-gaussian-pm-pv-to-gaussian-qm-qv
 
@@ -337,7 +365,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, det_fn=np.linalg.det, exact=True):
 		if logdet_S1[0]!=1:
 			logger.warning("logdet_S1 has sign {}".format(logdet_S1[0]))
 
-		logdet_term  = logdet_S1[1] - logdet_S0[1]#np.log((det_fn(S1)/det_fn(S0)))# + 1e-9)
+		logdet_term  = logdet_S1[1] - logdet_S0[1]
 	else:
 		tr_term = np.nan
 		logdet_term = np.nan
