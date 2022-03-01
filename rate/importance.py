@@ -374,8 +374,13 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, exact=True):
 	logger.debug("quad_term: {} \t tr_term: {} \t logdet_term: {}".format(
 		quad_term, tr_term, logdet_term
 	))
+
+	if exact:
+		kld_term = 0.5 * (tr_term + logdet_term + quad_term - N)
+	else:
+		kld_term = 0.5 * quad_term
 		
-	return quad_term, tr_term, logdet_term, 0.5 * (tr_term + logdet_term + quad_term - N)
+	return quad_term, tr_term, logdet_term, kld_term
 
 def jth_partition(mu, Sigma, j):
 	"""
