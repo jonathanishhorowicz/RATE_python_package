@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from scipy.linalg import solve_triangular, sqrtm
+from scipy.linalg import solve_triangular, sqrtm, cho_factor, cho_solve
 
-from typing import NamedTuple, Callable
+from typing import Callable
 from dataclasses import dataclass
 
 import datetime
@@ -16,10 +16,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 def qr_solve(A, b):
-	"""Solve Ax=b for x using the QR decomposition
-	"""
+	"""Solve Ax=b for x using the QR decomposition"""
 	Q, R = np.linalg.qr(A)
 	return np.matmul(solve_triangular(R, Q.T), b)
+
+def lstsq_solve(A, b):
+	return np.linalg.lstsq(A, b, rcond=None)[0]
+
+def chol_solve(A, b):
+    c, low = cho_factor(A)
+    return cho_solve((c, low), b)
 
 @dataclass
 class rateInput:
@@ -38,6 +44,8 @@ class rateInput:
 	run_diagnostics: bool = False
 	save_esa_post: bool = False
 	iteration_timer: bool = False
+	print_iteration_times: bool = False
+	solver: Callable = None
   
 @dataclass
 class rateIterationTracker:
@@ -59,7 +67,9 @@ class rateIterationTracker:
 	diagnostic_result: pd.DataFrame
 	group_sizes: list
 	save_esa_post: bool
-	iteration_timer: bool
+	iteration_times: list
+	print_iteration_times: bool
+	solver: Callable
 		
 @dataclass
 class rateResult:
@@ -71,6 +81,27 @@ class rateResult:
 	p: int
 	C: int
 	diagnostic_result: pd.DataFrame
+	iteration_times : list
+
+def get_solver(solver):
+	if solver is None:
+		return lstsq_solve
+
+	if not callable(solver):
+		if isinstance(solver, str):
+			if solver=="lstsq":
+				return lstsq_solve
+			elif solver=="qr":
+				return qr_solve
+			elif solver=="chol":
+				return chol_solve
+			else:
+				raise ValueError(f"Unrecognised solver {solver}")
+		else:
+			raise ValueError(f"Solver should be string if not callable, but is {type(solver)}")
+	else:
+		return solver
+
 		
 def check_posterior_shapes(m, V, X=None, xcheckdim=0):
 	if m is None and V is None:
@@ -189,7 +220,9 @@ def setup_rate_iterations(inp: rateInput):
 		diagnostic_result=[np.empty((len(J), 6), dtype=object) for _ in range(C)] if inp.run_diagnostics else None,
 		group_sizes=group_sizes,
 		save_esa_post=inp.save_esa_post,
-		iteration_timer=inp.iteration_timer
+		iteration_times=[np.zeros(len(J)) for _ in range(C)] if inp.iteration_timer else None,
+		print_iteration_times=inp.print_iteration_times,
+		solver=inp.solver
 	)
 	
 	return tracker
@@ -197,10 +230,6 @@ def setup_rate_iterations(inp: rateInput):
 def iterate_rate(tracker: rateIterationTracker):
 	
 	for c in range(tracker.C):
-
-		# for timing the iterations
-		if tracker.iteration_timer:
-			iteration_times = []
 
 		for out_idx, j in enumerate(tracker.iteration_list):
 
@@ -220,6 +249,7 @@ def iterate_rate(tracker: rateIterationTracker):
 			# calculate KLD
 			tracker.KLDs[c][out_idx] = kl_mvn(
 				mu_min_j, Sigma_min_j, mu_cond, Sigma_cond,
+				solver=tracker.solver,
 				jitter=tracker.jitter,
 				exact=tracker.exact)
 			
@@ -230,15 +260,17 @@ def iterate_rate(tracker: rateIterationTracker):
 				]
 
 			# time per iteration and ETA estimate
-			if tracker.iteration_timer:
+			if tracker.iteration_times is not None:
 				it_end_time = datetime.datetime.now()
-				iteration_times.append(it_end_time-it_start_time)
-				n_remaining_it = len(tracker.iteration_list) - out_idx - 1
-				mean_it_time = np.mean(iteration_times).seconds
-				this_it_td = iteration_times[-1]
-				logger.info("This iteration took {}".format(str(this_it_td)))
-				logger.info("Remaining {} iterations will take approximately {}".format(
-					n_remaining_it, str(this_it_td*n_remaining_it)))
+				tracker.iteration_times[c][out_idx] = (it_end_time-it_start_time).total_seconds()
+
+				if tracker.print_iteration_times:
+					n_remaining_it = len(tracker.iteration_list) - out_idx - 1
+					mean_it_time = np.mean(tracker.iteration_times[c][out_idx])
+					this_it_td = tracker.iteration_times[c][out_idx]
+					logger.info("This iteration took {}".format(str(this_it_td)))
+					logger.info("Remaining {} iterations will take approximately {}".format(
+						n_remaining_it, str(this_it_td*n_remaining_it)))
 
 			
 def make_rate_result(tracker: rateIterationTracker):
@@ -256,7 +288,6 @@ def make_rate_result(tracker: rateIterationTracker):
 		else:
 			df["RATE"] = df["KLD"].clip(lower=0.0)
 			df["RATE"] /= df["RATE"].sum()
-
 		
 	if tracker.diagnostic_result is not None:
 		tracker.diagnostic_result = [
@@ -274,6 +305,11 @@ def make_rate_result(tracker: rateIterationTracker):
 	if not tracker.save_esa_post:
 		tracker.Mb = None
 		tracker.Vb = None
+
+	if tracker.iteration_times is not None:
+		tracker.iteration_times = [
+			pd.DataFrame({'iteration' : range(len(x)), 'time_seconds' : x}) for x in tracker.iteration_times
+		]
 		  
 	res = rateResult(
 		Mb=tracker.Mb,
@@ -283,7 +319,8 @@ def make_rate_result(tracker: rateIterationTracker):
 		projection=tracker.projection,
 		p=tracker.p,
 		C=tracker.C,
-		diagnostic_result=tracker.diagnostic_result
+		diagnostic_result=tracker.diagnostic_result,
+		iteration_times=tracker.iteration_times
 	)
 	
 	return res
@@ -301,7 +338,9 @@ def rate(
 	printevery=0,
 	run_diagnostics=False,
 	save_esa_post=False,
-	iteration_timer=False
+	iteration_timer=False,
+	print_iteration_times=False,
+	solver=None
 ):
 	
 	rate_input = rateInput(
@@ -319,7 +358,9 @@ def rate(
 		printevery=printevery,
 		run_diagnostics=run_diagnostics,
 		save_esa_post=save_esa_post,
-		iteration_timer=iteration_timer
+		iteration_timer=iteration_timer,
+		print_iteration_times=print_iteration_times,
+		solver=get_solver(solver)
 	)
 	
 	check_rateInput(rate_input)
@@ -328,7 +369,7 @@ def rate(
 	return make_rate_result(tracker)
 
 
-def kl_mvn(m0, S0, m1, S1, jitter=0.0, exact=True):
+def kl_mvn(m0, S0, m1, S1, solver, jitter=0.0, exact=True):
 	"""
 	Kullback-Liebler divergence from Gaussian pm,pv to Gaussian qm,qv.
 	Also computes KL divergence from a single Gaussian pm,pv to a set
@@ -355,7 +396,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, exact=True):
 
 	# kl is made of three terms
 	if exact:
-		iS1S0 = np.linalg.lstsq(S1, S0, rcond=None)[0]
+		iS1S0 = solver(S1, S0)
 		tr_term   = np.trace(iS1S0) # can replace this with the hadamard product
 		logdet_S0 = np.linalg.slogdet(S0)
 		logdet_S1 = np.linalg.slogdet(S1)
@@ -369,7 +410,7 @@ def kl_mvn(m0, S0, m1, S1, jitter=0.0, exact=True):
 	else:
 		tr_term = np.nan
 		logdet_term = np.nan
-	quad_term = diff.T @ np.linalg.lstsq(S1, diff, rcond=None)[0] 
+	quad_term = diff.T @ solver(S1, diff)
 
 	logger.debug("quad_term: {} \t tr_term: {} \t logdet_term: {}".format(
 		quad_term, tr_term, logdet_term
