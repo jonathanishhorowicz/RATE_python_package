@@ -17,7 +17,7 @@ class ProjectionBase(metaclass=ABCMeta):
 
 	@abstractmethod
 	def esa_posterior(self, X, M_F, V_F):
-		pass
+		raise NotImplementedError
 
 class CovarianceProjection(ProjectionBase):
 	"""The covariance projection
@@ -110,7 +110,7 @@ class PseudoinverseProjection(ProjectionBase):
 		return M_B, V_B
 
 	def __repr__(self):
-		return "ridge_projection"
+		return "pinv_projection"
 
 
 class RidgeProjection(ProjectionBase):
@@ -154,9 +154,11 @@ class RidgeProjection(ProjectionBase):
 			M_F.shape[0]))
 		logger.debug("Trying {} alphas from {} to {}".format(
 			len(self.alphas), np.amin(self.alphas), np.amax(self.alphas)))
+
+		# center logits before fitting ridge model
 		
 		self.model = [
-			RidgeCV(alphas=self.alphas, fit_intercept=False, normalize=False).fit(X, M_F[c])
+			RidgeCV(alphas=self.alphas, fit_intercept=False).fit(X, M_F[c])
 					for c in range(M_F.shape[0])
 		]
 				
