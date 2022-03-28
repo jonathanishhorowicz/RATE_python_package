@@ -122,11 +122,13 @@ class RidgeProjection(ProjectionBase):
 	Attributes
 		- alphas: sequence of alpha values
 	"""
-	def __init__(self, alphas=np.logspace(-5, 5, 11)):
+	def __init__(self, alphas=np.logspace(-5, 5, 11), ridgeCV_args={}):
 		super().__init__()
 		self.alphas = alphas
 		self.model = None
 		self.lambdas = []
+		self.ridgeCV_args = {}
+		self.cv_values = []
 		
 	def esa_posterior(self, X, M_F, V_F):
 		"""Calculate the mean and covariance of the effect size analogue posterior.
@@ -158,7 +160,7 @@ class RidgeProjection(ProjectionBase):
 		# center logits before fitting ridge model
 		
 		self.model = [
-			RidgeCV(alphas=self.alphas, fit_intercept=False).fit(X, M_F[c])
+			RidgeCV(alphas=self.alphas, fit_intercept=False, **self.ridgeCV_args).fit(X, M_F[c])
 					for c in range(M_F.shape[0])
 		]
 				
@@ -187,6 +189,7 @@ class RidgeProjection(ProjectionBase):
 			np.linalg.solve(np.dot(X.T, X) + lam * np.identity(X.shape[1]), X.T)
 			for lam in self.lambdas
 		]
+
 	def __repr__(self):
 		return "ridge_projection"
 

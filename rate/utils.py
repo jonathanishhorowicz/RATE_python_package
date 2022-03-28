@@ -79,6 +79,7 @@ def safe_rescale(train_arr, test_arr=None):
 	test_arr_ = ss.transform(test_arr) if test_arr is not None else None
 	return train_arr_, test_arr_
 
+
 def plot_learning_curves(bnn, **kwargs):
 	
 	# format dataframe of fit history

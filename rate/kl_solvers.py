@@ -168,9 +168,9 @@ class DirectCovSolver(KLDSolver):
 #         return [s[k]**0.5 * U[:,k] for k in range(max_rank)]
 
 class PrecisionSolver(KLDSolver):
-    def __init__(self, Mb, Vb, J, jitter=1e-9):
+    def __init__(self, Mb, Vb, J, inv_func, jitter=1e-9):
         super().__init__(Mb, Vb, J, jitter)
-        self.full_precision = chol_then_inv(Vb)
+        self.full_precision = inv_func(Vb)
         
     def solve_all_KLDs(self):
         out_arr = np.zeros((len(self.J), 1))

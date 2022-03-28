@@ -10,7 +10,7 @@ import copy
 
 from .projections import ProjectionBase, CovarianceProjection
 from .utils import isPD
-from .kl_solvers import KLDSolver
+from .kl_solvers import PrecisionSolver
 
 import logging
 logger = logging.getLogger(__name__)
@@ -343,7 +343,7 @@ def rate(
 	save_esa_post=False,
 	iteration_timer=False,
 	print_iteration_times=False,
-	solver_maker=None
+	solver_maker=PrecisionSolver
 	):
 
 	rate_input = rateInput(
