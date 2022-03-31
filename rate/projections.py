@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from sklearn.linear_model import RidgeCV
 
 from abc import ABCMeta, abstractmethod
@@ -66,12 +67,14 @@ class CovarianceProjection(ProjectionBase):
 	def __repr__(self):
 		return "covariance_projection"
 
+
 class PseudoinverseProjection(ProjectionBase):
 	"""The pseudoinverse projection
 	"""
-	def __init__(self):
+	def __init__(self, rcond=1e-15):
 		super().__init__()
 		self._X_dagger = None
+		self.rcond = rcond
 
 	def esa_posterior(self, X, M_F, V_F):
 		"""Calculate the mean and covariance of the effect size analogue posterior.
@@ -93,11 +96,11 @@ class PseudoinverseProjection(ProjectionBase):
 		if self._X is None:
 			logger.debug("No X is cached - calculating pinv(X) and storing it")
 			self._X = X
-			self._X_dagger = np.linalg.pinv(self._X)
+			self._X_dagger = np.linalg.pinv(self._X, self.rcond)
 		elif not np.array_equal(self._X, X):
 			logger.debug("Does not match cached X: calculating new pinv(X) and storing it")
 			self._X = X
-			self._X_dagger = np.linalg.pinv(self._X)
+			self._X_dagger = np.linalg.pinv(self._X, self.rcond)
 
 		logger.debug("_X has shape {}, _X_dagger has shape {}".format(self._X.shape, self._X_dagger.shape))
 
@@ -127,8 +130,7 @@ class RidgeProjection(ProjectionBase):
 		self.alphas = alphas
 		self.model = None
 		self.lambdas = []
-		self.ridgeCV_args = {}
-		self.cv_values = []
+		self.ridgeCV_args = ridgeCV_args
 		
 	def esa_posterior(self, X, M_F, V_F):
 		"""Calculate the mean and covariance of the effect size analogue posterior.
@@ -158,10 +160,11 @@ class RidgeProjection(ProjectionBase):
 			len(self.alphas), np.amin(self.alphas), np.amax(self.alphas)))
 
 		# center logits before fitting ridge model
+		M_F_c = M_F - M_F.mean(axis=1, keepdims=True)
 		
 		self.model = [
-			RidgeCV(alphas=self.alphas, fit_intercept=False, **self.ridgeCV_args).fit(X, M_F[c])
-					for c in range(M_F.shape[0])
+			RidgeCV(alphas=self.alphas, fit_intercept=False, **self.ridgeCV_args).fit(X, M_F_c[c])
+					for c in range(M_F_c.shape[0])
 		]
 				
 		self.lambdas = [1.0/(2.0*m.alpha_) for m in self.model]
@@ -172,7 +175,7 @@ class RidgeProjection(ProjectionBase):
 		X_pinvs = self._solve_reg_pinv(X)
 		
 		logger.debug("Calculating esa posterior mean")
-		M_B = [np.matmul(X_pinvs[c], M_F[c,:,np.newaxis]).squeeze(axis=1) for c in range(len(X_pinvs))]
+		M_B = [np.matmul(X_pinvs[c], M_F_c[c,:,np.newaxis]).squeeze(axis=1) for c in range(len(X_pinvs))]
 		
 		logger.debug("Calculating esa posterior covariance")
 		V_B = [np.matmul(np.matmul(X_pinvs[c], V_F[c]), X_pinvs[c].T) for c in range(len(X_pinvs))]
@@ -189,6 +192,18 @@ class RidgeProjection(ProjectionBase):
 			np.linalg.solve(np.dot(X.T, X) + lam * np.identity(X.shape[1]), X.T)
 			for lam in self.lambdas
 		]
+
+	def mse_path(self):
+		mse_df = []
+
+		for m in self.model:
+			df = pd.DataFrame(m.cv_values_).T
+			df["alpha"] = m.alphas
+			df = df.melt(id_vars="alpha", var_name="cv_fold", value_name="cv_mse")
+			df["log10_alpha"] = np.log10(df.alpha)
+			mse_df.append(df)
+
+		return mse_df
 
 	def __repr__(self):
 		return "ridge_projection"
