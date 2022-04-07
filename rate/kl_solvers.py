@@ -229,3 +229,35 @@ class PrecisionSolver2(KLDSolver):
         
         return out_df, None
     
+class PrecisionSolver3(KLDSolver):
+    def __init__(self, Mb, Vb, J, inv_func, jitter=1e-9):
+        super().__init__(Mb, Vb, J, jitter)
+        self.full_covariance = Vb
+        self.full_precision = inv_func(Vb)
+        
+    def solve_all_KLDs(self):
+        out_arr = np.zeros((len(self.J), 1))
+        precision_term = np.zeros((len(self.J), 1))
+        
+        for out_idx, j in enumerate(self.J):
+                    
+            # partition ESA posterior
+            mu_j, mu_min_j, sigma_j, sigma_min_j, Sigma_min_j = jth_partition(
+                self.Mb, self.Vb, j
+            )
+            
+            # conditional mean
+            # mu_cond = mu_min_j - np.dot(sigma_min_j, np.linalg.lstsq(sigma_j, mu_j, rcond=None)[0])
+            
+            # diff = mu_cond - mu_min_j
+            # out_arr[out_idx] = diff.T @ np.delete(np.delete(self.full_precision, j, axis=1), j, axis=0)  @ 
+            tmpval = sigma_min_j @ chol_solve(sigma_j, mu_j)
+            tmpval = tmpval.T @ np.delete(np.delete(self.full_precision, j, axis=1), j, axis=0)  @ tmpval
+            out_arr[out_idx] = tmpval
+                        
+        out_df = pd.DataFrame(
+            np.hstack([out_arr, 0.5*out_arr]), columns=["quad", "KLD"]
+        )
+        
+        return out_df, None
+    
