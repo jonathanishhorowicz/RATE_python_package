@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from scipy.linalg import cholesky, cho_solve, cho_factor, eigh
-from .solve_utils import condition_gaussian, jth_partition, kl_mvn, get_solver, chol_then_inv
+from .solve_utils import condition_gaussian, jth_partition, kl_mvn, get_solver, chol_then_inv, chol_solve
 
 import copy
 
