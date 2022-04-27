@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 
 def vanilla_gradients(model, X, numpy=True):
 	"""Computes the vanilla gradients of model output w.r.t inputs.
